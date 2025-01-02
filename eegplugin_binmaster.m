@@ -5,7 +5,7 @@ function currvers = eegplugin_myplugin(fig, trystrs, catchstrs)
     %        Main setup function          %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-    % Call the default values script to intialize global variables
+    % intialize global variables
     binmaster_default_values;
     
      % Retrieve the version for display
@@ -47,20 +47,19 @@ function currvers = eegplugin_myplugin(fig, trystrs, catchstrs)
     end
 end
 
-% Callback functions for menu items
 function loadData(~, ~)
     disp('Load Data selected.');
-    % Add actual functionality here
+    % To do
 end
 
 function filterSetup(~, ~)
     disp('Filter Setup selected.');
-    % Add actual functionality here
+    % To do
 end
 
 function exportData(~, ~)
     disp('Export Data selected.');
-    % Add actual functionality here
+    % To do
 end
 
 

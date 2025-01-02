@@ -20,8 +20,8 @@ function EEG = parse_and_bin_events(EEG, bdf_file, varargin)
 % EEG = parse_and_bin_events(EEG, 'bdf_example.txt', 'Ignore', [99, 100], ...
 %       'ExportEL', 'eventlist_updated.txt', 'Report', 'on');
 %
-% AUTHOR: Brandon Snyder
-% DATE: 12/20/2024
+% 
+% 
 
 % Parse input arguments
 p = inputParser;
@@ -40,30 +40,42 @@ report_flag = p.Results.Report;
 
 % Step 1: Parse the Bin Descriptor File
 bins = parse_bdf(bdf_file);
+
 fprintf('BDF parsed successfully. %d bins loaded.\n', length(bins));
 
 % Step 2: Initialize and Validate EVENTLIST
 if ~isfield(EEG, 'EVENTLIST') || ~isfield(EEG.EVENTLIST, 'eventinfo')
+
     error('EEG.EVENTLIST not found. Use "Create EVENTLIST" first.');
+
 end
 
 % Step 3: Event Matching and Bin Assignment
 eventinfo = EEG.EVENTLIST.eventinfo;
+
 for i = 1:length(eventinfo)
+
     % Skip ignored events
     if ismember(eventinfo(i).code, ignore_codes)
+
         continue;
+
     end
     
     % Check for forbidden events
     for b = 1:length(bins)
+
         if ismember(eventinfo(i).code, bins(b).forbidden_codes)
+
             continue;
+
         end
         
         % Match events to bins
         if ismember(eventinfo(i).code, bins(b).event_codes)
+
             % Temporal constraints logic (to be added)
+
             eventinfo(i).bini = bins(b).bin_number;
         end
     end
@@ -75,13 +87,18 @@ fprintf('Event assignment to bins completed.\n');
 
 % Step 5: Export Updated EVENTLIST (Optional)
 if ~isempty(export_path)
+
     export_eventlist(eventinfo, export_path);
+
     fprintf('Updated EVENTLIST saved to: %s\n', export_path);
+
 end
 
 % Step 6: Generate Report (Optional)
 if strcmpi(report_flag, 'on')
+
     generate_report(eventinfo, bins);
+
 end
 
 end
