@@ -160,13 +160,27 @@ function [EEG, com] = pop_load_datasets(EEG)
                     continue;
                 end
 
-                % Validate EEG structure
+                % Validate EEG structure and events
                 if ~isfield(EEG, 'srate') || isempty(EEG.srate)
                     warning('Dataset %s missing sampling rate. Skipping...', dataset_path);
                     continue;
                 end
 
+                % Check for event data
+                if ~isfield(EEG, 'event') || isempty(EEG.event)
+                    warning('Dataset %s has no events. This may cause issues with interest area calculations.', dataset_path);
+                    fprintf('Loading dataset anyway, but please verify event data exists in the original file.\n');
+                else
+                    fprintf('Successfully loaded dataset with %d events.\n', length(EEG.event));
+                    % Add detailed event information
+                    fprintf('First event type: %s\n', EEG.event(1).type);
+                    fprintf('Event field names: %s\n', strjoin(fieldnames(EEG.event), ', '));
+                end
+
+                % Add verification before storage
+                fprintf('Before storage - Dataset has %d events\n', length(EEG.event));
                 [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, 0);
+                fprintf('After storage - Dataset has %d events\n', length(EEG.event));
                 
             catch ME
                 warning('Failed to load dataset %s:\n%s\nStack trace:\n%s', ...
@@ -174,6 +188,9 @@ function [EEG, com] = pop_load_datasets(EEG)
             end
         end
 
+        % Add verification before closing
+        fprintf('Final EEG structure has %d events\n', length(EEG.event));
+        
         % Assign updated ALLEEG, EEG, CURRENTSET to base workspace
         assignin('base', 'ALLEEG', ALLEEG);
         assignin('base', 'EEG', EEG);

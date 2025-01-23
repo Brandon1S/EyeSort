@@ -16,10 +16,10 @@ function currvers = eegplugin_eyesort(fig, ~, ~)
         error('eegplugin_eyesort requires 3 arguments');
     end
 
-    % Add the to the MATLAB path (fixed typo in comment)
+    % Add the to the MATLAB path
     p = which('eegplugin_eyesort', '-all');
     
-    % Ensures no duplicates (improved error message)
+    % Ensures no duplicates
     if length(p) > 1
         warning('EyeSort:MultiplePaths', ...
                 'Multiple EyeSort folders found. Using the first one: %s', p{1});
