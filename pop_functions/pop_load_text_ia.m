@@ -26,6 +26,10 @@ function [EEG, com] = pop_load_text_ia(EEG)
         [0.4 1]
         [2 1]
         [2 1]
+        [2 1]       % New line for Start Code
+        [2 1]       % New line for End Code
+        [2 1]       % New line for Condition Triggers
+        [2 1]       % New line for Item Triggers
         1
         [0.5 0.2 0.2]
     };
@@ -41,10 +45,10 @@ function [EEG, com] = pop_load_text_ia(EEG)
         {}, ...
         ... 
         {'Style','text','String','Offset (pixels):'}, ...
-        {'Style','edit','String','50','tag','edtOffset'}, ...
+        {'Style','edit','String','281','tag','edtOffset'}, ...
         ...
         {'Style','text','String','Pixels per char:' }, ...
-        {'Style','edit','String','10','tag','edtPxPerChar'}, ...
+        {'Style','edit','String','14','tag','edtPxPerChar'}, ...
         ...
         {'Style','text','String','Number of regions:'}, ...
         {'Style','edit','String','4','tag','edtNumRegions'}, ...
@@ -58,8 +62,20 @@ function [EEG, com] = pop_load_text_ia(EEG)
         {'Style','text','String','Item Column Name:'}, ...
         {'Style','edit','String','trigitem','tag','edtItemName'}, ...
         ...
+        {'Style','text','String','Start Trial Code:'}, ...
+        {'Style','edit','String','S254','tag','edtStartCode'}, ...
+        ...
+        {'Style','text','String','End Trial Code:'}, ...
+        {'Style','edit','String','S255','tag','edtEndCode'}, ...
+        ...
+        {'Style','text','String','Condition Triggers (comma-separated):'}, ...
+        {'Style','edit','String','S211, S213, S221, S223','tag','edtCondTriggers'}, ...
+        ...
+        {'Style','text','String','Item Triggers (comma-separated):'}, ...
+        {'Style','edit','String','S1:S112','tag','edtItemTriggers'}, ...
+        ...
         {}, ...
-        ... % Cancel and Enter buttons
+        ...
         {}, ...
         {'Style', 'pushbutton', 'String', 'Cancel', 'callback', @(~,~) cancel_button}, ...
         {'Style', 'pushbutton', 'String', 'Confirm', 'callback', @(~,~) confirm_button}, ...
@@ -190,27 +206,104 @@ function [EEG, com] = pop_load_text_ia(EEG)
         fprintf('Debug: Number of events before call: %d\n', length(EEG.event));
         %}
 
-        % Call compute_text_based_ia with validated inputs
-        try
-            EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
-                                      numRegions, regionNames, conditionColName, ...
-                                      itemColName);
-        catch ME
-            errordlg(['Error in compute_text_based_ia: ' ME.message], 'Error');
-            return;
+        % Get new parameters from GUI
+        startCodeStr = get(findobj('tag','edtStartCode'), 'String');
+        endCodeStr = get(findobj('tag','edtEndCode'), 'String');
+        condTriggersStr = get(findobj('tag','edtCondTriggers'), 'String');
+        itemTriggersStr = get(findobj('tag','edtItemTriggers'), 'String');
+        
+        % Convert cell arrays to strings if necessary
+        if iscell(startCodeStr), startCodeStr = startCodeStr{1}; end
+        if iscell(endCodeStr), endCodeStr = endCodeStr{1}; end
+        if iscell(condTriggersStr), condTriggersStr = condTriggersStr{1}; end
+        if iscell(itemTriggersStr), itemTriggersStr = itemTriggersStr{1}; end
+        
+        % Parse comma-separated lists into cell arrays
+        condTriggers = strtrim(strsplit(condTriggersStr, ','));
+        
+        % Special handling for item triggers with range notation (e.g., "S1:S112")
+        itemTriggers = {};
+        itemParts = strtrim(strsplit(itemTriggersStr, ','));
+        
+        for i = 1:length(itemParts)
+            currentPart = itemParts{i};
+            
+            % Check if this part contains a range (e.g., "S1:S112")
+            if contains(currentPart, ':')
+                rangeParts = strsplit(currentPart, ':');
+                if length(rangeParts) == 2
+                    % Extract the numeric parts from the range (e.g., "1" and "112" from "S1:S112")
+                    startStr = rangeParts{1};
+                    endStr = rangeParts{2};
+                    
+                    % Extract the prefix (e.g., "S") and the numbers
+                    startPrefix = regexp(startStr, '^[^0-9]*', 'match', 'once');
+                    endPrefix = regexp(endStr, '^[^0-9]*', 'match', 'once');
+                    
+                    startNum = str2double(regexp(startStr, '[0-9]+', 'match', 'once'));
+                    endNum = str2double(regexp(endStr, '[0-9]+', 'match', 'once'));
+                    
+                    % Validate the range
+                    if isnan(startNum) || isnan(endNum) || startNum > endNum
+                        errordlg(['Invalid item range: ' currentPart], 'Invalid Input');
+                        return;
+                    end
+                    
+                    % Use the prefix from the start if both have prefixes
+                    prefix = startPrefix;
+                    if isempty(prefix) && ~isempty(endPrefix)
+                        prefix = endPrefix;
+                    end
+                    
+                    % Generate all items in the range
+                    for j = startNum:endNum
+                        itemTriggers{end+1} = [prefix num2str(j)];
+                    end
+                    
+                    fprintf('Expanded range %s to %d item triggers\n', currentPart, endNum-startNum+1);
+                else
+                    % Invalid range format
+                    errordlg(['Invalid range format: ' currentPart], 'Invalid Input');
+                    return;
+                end
+            else
+                % Not a range, add as is
+                itemTriggers{end+1} = currentPart;
+            end
+        end
+        
+        % Display the expanded item triggers for verification
+        if length(itemTriggers) > 10
+            fprintf('Generated %d item triggers: %s ... %s\n', length(itemTriggers), ...
+                    strjoin(itemTriggers(1:5), ', '), strjoin(itemTriggers(end-4:end), ', '));
+        else
+            fprintf('Generated item triggers: %s\n', strjoin(itemTriggers, ', '));
         end
 
-        % Store back to base workspace
-        assignin('base', 'EEG', EEG);
-        %fprintf('Debug: Stored updated EEG back to workspace\n');
+        % Call the computational function with all parameters
+        try
+            processedEEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
+                                      numRegions, regionNames, conditionColName, ...
+                                      itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers);
+            
+            % Store processed data back to base workspace
+            assignin('base', 'EEG', processedEEG);
+            EEG = processedEEG; % Keep a local copy for passing to filter GUI
 
-        % Build command string for history
-        com = sprintf('EEG = pop_loadTextIA(EEG); %% file=%s offset=%g px=%g',...
+            % Update command string for history
+            com = sprintf('EEG = pop_loadTextIA(EEG); %% file=%s offset=%g px=%g',...
                      txtFilePath, offset, pxPerChar);
 
-        % Close GUI, redraw EEGLAB
-        close(gcf);
-        eeglab('redraw');
+            % Close GUI
+            close(gcf);
+            
+            % Redraw EEGLAB to reflect changes
+            eeglab('redraw');
+            
+        catch ME
+            errordlg(['Error: ' ME.message], 'Error');
+            return;
+        end
     end
 end
 

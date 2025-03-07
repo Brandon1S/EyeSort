@@ -66,9 +66,14 @@ function currvers = eegplugin_eyesort(fig, ~, ~)
             
             uimenu(loadInterestAreasMenu, 'Label', 'Load file with IA pixel locations', ...
                 'callback', @(src,event) try_callback(@pop_load_pixel_ia, src, event));
+
+            % Add the new filter datasets menu item
+            uimenu(submenu, 'label', 'Filter Datasets', 'separator', 'on', ...
+                'callback', @(src,event) try_callback(@pop_filter_datasets, src, event));
             
             uimenu(submenu, 'label', 'Help', 'separator', 'on', ...
                    'callback', @(src,event) try_callback(@help_button, src, event));
+
         catch ME
             error('EyeSort:MenuCreation', 'Failed to create EyeSort menu: %s', ME.message);
         end
@@ -97,4 +102,3 @@ function launch_dataset_loader()
     end
 end
 %}
-
