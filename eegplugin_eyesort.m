@@ -52,6 +52,10 @@ function currvers = eegplugin_eyesort(fig, ~, ~)
             % Store version number in a more accessible way
             setappdata(submenu, 'EyeSortVersion', eyesortver);
             
+            % Add version as first item in the dropdown menu
+            uimenu(submenu, 'label', ['EyeSort v' eyesortver], 'enable', 'off', ...
+                   'separator', 'on');
+            
             % Add error checking for callbacks
             uimenu(submenu, 'label', 'Load EEG Datasets', 'separator', 'on', ...
                    'callback', @(src,event) try_callback(@pop_load_datasets, src, event));

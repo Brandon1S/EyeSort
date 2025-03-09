@@ -48,6 +48,11 @@ function [EEG, com] = pop_filter_datasets(EEG)
         return;
     end
     
+    % Initialize or increment the filter count
+    if ~isfield(EEG, 'eyesort_filter_count')
+        EEG.eyesort_filter_count = 0;
+    end
+    
     % Extract available filtering options from the data
     % We'll still use condition and item information from the events but won't display them in the GUI
     conditionSet = [];
@@ -104,17 +109,16 @@ function [EEG, com] = pop_filter_datasets(EEG)
     end
 
     % Create the figure
-    hFig = figure('Name','Load EEG Datasets',...
+    hFig = figure('Name','Filter EEG Dataset',...
                   'NumberTitle','off',...
                   'MenuBar','none',...
                   'ToolBar','none',...
                   'Color',[0.94 0.94 0.94], ...
                   'Resize', 'off');
     
-    % Create filter GUI
+    % Create filter GUI with time window option removed
     geomhoriz = { ...
         1 ...
-        [2 1] ...
         [2 1] ...
         [2 1] ...
         [2 1] ...
@@ -129,10 +133,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
         {'Style','text','String','Filter Dataset Options', 'FontWeight', 'bold'}, ...
         ...
         {'Style','text','String','Time-Locked Region (Select Primary Region):'}, ...
-        {'Style','listbox','String',regionNames, 'Max', length(regionNames), 'Min', 0, 'tag','lstTimeLocked'}, ...
-        ...
-        {'Style','text','String','Time Window:'}, ...
-        {'Style','popupmenu','String',{'Any time', 'Custom range...'}, 'tag','popTimeWindow', 'callback', @time_window_callback}, ...
+        {'Style','listbox','String', regionNames, 'Max', length(regionNames), 'Min', 0, 'tag','lstTimeLocked'}, ...
         ...
         {'Style','text','String','Pass Index:'}, ...
         {'Style','popupmenu','String',{'Any pass', 'First pass only', 'Not first pass'}, 'tag','popPassIndex'}, ...
@@ -159,27 +160,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     % Create the GUI
     [~, ~, ~, ~] = supergui('fig', hFig,'geomhoriz', geomhoriz, 'uilist', uilist, 'title', 'Filter Dataset');
     
-    % GUI callback functions
-    function time_window_callback(src, ~)
-        if get(src, 'Value') == 2 % Custom range selected
-            % Prompt for time range
-            prompt = {'Start time (ms):', 'End time (ms):'};
-            dlgtitle = 'Enter Time Window';
-            dims = [1 35];
-            definput = {'0', '1000'};
-            answer = inputdlg(prompt, dlgtitle, dims, definput);
-            
-            if ~isempty(answer)
-                % Store the values in a hidden field or tag for later use
-                setappdata(gcf, 'timeWindowStart', str2double(answer{1}));
-                setappdata(gcf, 'timeWindowEnd', str2double(answer{2}));
-            else
-                % Reset to "Any time" if canceled
-                set(src, 'Value', 1);
-            end
-        end
-    end
-    
+    % GUI callback functions - time_window_callback removed
     function cancel_button(~,~)
         close(gcf);
     end
@@ -188,7 +169,6 @@ function [EEG, com] = pop_filter_datasets(EEG)
         % Get selected filter options
         selectedTimeLockedRegions = get(findobj('tag','lstTimeLocked'), 'Value');
         
-        timeWindowOption = get(findobj('tag','popTimeWindow'), 'Value');
         passIndexOption = get(findobj('tag','popPassIndex'), 'Value');
         prevRegionOption = get(findobj('tag','popPrevRegion'), 'Value');
         nextRegionOption = get(findobj('tag','popNextRegion'), 'Value');
@@ -202,14 +182,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
         
         % Convert selections to actual values
-        timeLockedRegionValues = regionNames(selectedTimeLockedRegions);
-        
-        % Get time window values if custom range was selected
-        timeWindowStart = [];
-        timeWindowEnd = [];
-        if timeWindowOption == 2
-            timeWindowStart = getappdata(gcf, 'timeWindowStart');
-            timeWindowEnd = getappdata(gcf, 'timeWindowEnd');
+        timeLockedRegionValues = cell(1, length(selectedTimeLockedRegions));
+        for i = 1:length(selectedTimeLockedRegions)
+            timeLockedRegionValues{i} = regionNames{selectedTimeLockedRegions(i)};
         end
         
         % Get previous/next region values
@@ -223,22 +198,112 @@ function [EEG, com] = pop_filter_datasets(EEG)
             nextRegion = regionNames{nextRegionOption-1};
         end
         
+        % Increment the filter count for this dataset
+        EEG.eyesort_filter_count = EEG.eyesort_filter_count + 1;
+        currentFilterCount = EEG.eyesort_filter_count;
+        
         % Apply the filter
         try
             filteredEEG = filter_dataset(EEG, conditionSet, itemSet, timeLockedRegionValues, ...
-                                        timeWindowOption, timeWindowStart, timeWindowEnd, ...
                                         passIndexOption, prevRegion, nextRegion, ...
-                                        fixationTypeOption, saccadeDirectionOption);
+                                        fixationTypeOption, saccadeDirectionOption, currentFilterCount);
+            
+            % Store the filter count back to the filtered dataset
+            filteredEEG.eyesort_filter_count = currentFilterCount;
+            
+            % Store descriptive info about this filter for future BDF generation
+            if ~isfield(filteredEEG, 'eyesort_filter_descriptions')
+                filteredEEG.eyesort_filter_descriptions = {};
+            end
+            
+            % Build a description of this filter
+            filterDesc = struct();
+            filterDesc.filter_number = currentFilterCount;
+            filterDesc.filter_code = sprintf('%02d', currentFilterCount);
+            filterDesc.regions = timeLockedRegionValues;
+            filterDesc.pass_type = get(findobj('tag','popPassIndex'), 'String');
+            filterDesc.pass_value = passIndexOption;
+            filterDesc.prev_region = prevRegion;
+            filterDesc.next_region = nextRegion;
+            filterDesc.fixation_type = get(findobj('tag','popFixationType'), 'String');
+            filterDesc.fixation_value = fixationTypeOption;
+            filterDesc.saccade_dir = get(findobj('tag','popSaccadeDirection'), 'String');
+            filterDesc.saccade_value = saccadeDirectionOption;
+            
+            % Add timestamp
+            filterDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
+            
+            % Append to the filter descriptions
+            filteredEEG.eyesort_filter_descriptions{end+1} = filterDesc;
             
             % Update the EEG in base workspace
             assignin('base', 'EEG', filteredEEG);
             
             % Update command string for history
-            com = sprintf('EEG = pop_filter_datasets(EEG); %% Applied advanced filtering');
+            com = sprintf('EEG = pop_filter_datasets(EEG); %% Applied filter #%d', currentFilterCount);
+            
+            % Notify user of successful filtering
+            % Create a more descriptive message
+            msgStr = sprintf(['Filter #%d applied successfully!\n\n', ...
+                             'Identified %d events matching your filter criteria.\n\n', ...
+                             'These events have been labeled with a 6-digit code format: CCRRFF\n', ...
+                             'Where: CC = condition code, RR = region code, FF = filter code (%02d)\n\n', ...
+                             'These codes will be used for BDF generation.\n\n', ...
+                             'Note: This message will remain visible for 5 seconds.\n', ...
+                             'See the MATLAB command window for more details.'], ...
+                             currentFilterCount, filteredEEG.eyesort_last_filter_matched_count, currentFilterCount);
+            
+            % Create a message box that won't close automatically
+            hMsg = msgbox(msgStr, 'Filter Coding Complete', 'help');
+            
+            % Get the handle to the OK button in the message box
+            hBtn = findobj(hMsg, 'Type', 'UIControl', 'Style', 'pushbutton');
+            if ~isempty(hBtn)
+                % Make it bigger and more noticeable
+                set(hBtn, 'FontWeight', 'bold', 'FontSize', 10);
+            end
+            
+            % Print detailed information about the filtered codes
+            fprintf('\n============== FILTER RESULTS ==============\n');
+            fprintf('Filter #%d applied successfully!\n', currentFilterCount);
+            fprintf('Identified %d events matching the filter criteria.\n', filteredEEG.eyesort_last_filter_matched_count);
+            fprintf('These events have been labeled with 6-digit codes.\n');
+            
+            % Display some sample codes if any events were matched
+            if filteredEEG.eyesort_last_filter_matched_count > 0
+                % Find the first few events with the filter code
+                sampleCount = 0;
+                for i = 1:length(filteredEEG.event)
+                    if isfield(filteredEEG.event(i), 'eyesort_filter_code') && ...
+                       strcmp(filteredEEG.event(i).eyesort_filter_code, sprintf('%02d', currentFilterCount))
+                        fprintf('Event %d: Code = %s (Condition %s, Region %s, Filter %s)\n', ...
+                               i, ...
+                               filteredEEG.event(i).eyesort_full_code, ...
+                               filteredEEG.event(i).eyesort_condition_code, ...
+                               filteredEEG.event(i).eyesort_region_code, ...
+                               filteredEEG.event(i).eyesort_filter_code);
+                        
+                        sampleCount = sampleCount + 1;
+                        if sampleCount >= 5  % Show up to 5 examples
+                            break;
+                        end
+                    end
+                end
+                if sampleCount == 0
+                    fprintf('No events with filter code %02d found.\n', currentFilterCount);
+                end
+            end
+            fprintf('===========================================\n\n');
+            
+            % Give the user time to see the message box before closing GUI
+            pause(5);
             
             % Close GUI, redraw EEGLAB
             close(gcf);
-            eeglab('redraw');
+            
+            % Don't automatically close the message box
+            % Instead, let the user close it when ready
+            % eeglab('redraw');
         catch ME
             errordlg(['Error applying filter: ' ME.message], 'Error');
         end
@@ -246,20 +311,48 @@ function [EEG, com] = pop_filter_datasets(EEG)
 end
 
 function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions, ...
-                                     timeWindowOption, timeWindowStart, timeWindowEnd, ...
                                      passIndexOption, prevRegion, nextRegion, ...
-                                     fixationTypeOption, saccadeDirectionOption)
+                                     fixationTypeOption, saccadeDirectionOption, filterCount)
     % Create a copy of the EEG structure
     filteredEEG = EEG;
     
-    % Initialize logical mask for which events to keep
-    keepEvent = false(size(EEG.event));
+    % Create a tracking count for matched events (not for filtering, just for reporting)
+    matchedEventCount = 0;
+    
+    % Create region code mapping - map region names to 2-digit codes
+    regionCodeMap = containers.Map('KeyType', 'char', 'ValueType', 'char');
+    uniqueRegions = unique({EEG.event.current_region});
+    
+    % Define standard region order with fixed numbering
+    standardRegions = {'Beginning', 'PreTarget', 'Target_word', 'Ending'};
+    for i = 1:length(standardRegions)
+        regionCodeMap(standardRegions{i}) = sprintf('%02d', i);
+    end
+    
+    % Add any additional regions that weren't in the standard list
+    nextCode = length(standardRegions) + 1;
+    for i = 1:length(uniqueRegions)
+        regionName = uniqueRegions{i};
+        if ~isempty(regionName) && ~isKey(regionCodeMap, regionName)
+            regionCodeMap(regionName) = sprintf('%02d', nextCode);
+            nextCode = nextCode + 1;
+        end
+    end
+    
+    % Print the region code mapping for verification
+    fprintf('\n============ REGION CODE MAPPING ============\n');
+    allRegions = keys(regionCodeMap);
+    for i = 1:length(allRegions)
+        fprintf('  Region "%s" = Code %s\n', allRegions{i}, regionCodeMap(allRegions{i}));
+    end
+    fprintf('=============================================\n\n');
     
     % Apply filtering criteria
     for i = 1:length(EEG.event)
         evt = EEG.event(i);
         
-        % Skip non-fixation events
+        % Only process fixation events for potential code updates
+        % Non-fixation events remain unchanged
         if ~startsWith(evt.type, 'R_fixation')
             continue;
         end
@@ -278,7 +371,7 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             passesItem = any(evt.item_number == items);
         end
         
-        % Skip events that don't match previously selected conditions/items
+        % Skip to next event if it doesn't match condition/item criteria
         if ~passesCondition || ~passesItem
             continue;
         end
@@ -289,16 +382,9 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             passesTimeLockedRegion = any(strcmp(evt.current_region, timeLockedRegions));
         end
         
-        % Skip events that don't match the time-locked region
+        % Skip to next event if it doesn't match time-locked region
         if ~passesTimeLockedRegion
             continue;
-        end
-        
-        % Time window filtering
-        passesTimeWindow = true;
-        if timeWindowOption == 2 && isfield(evt, 'latency')
-            eventTime = evt.latency / EEG.srate * 1000; % Convert to ms
-            passesTimeWindow = (eventTime >= timeWindowStart && eventTime <= timeWindowEnd);
         end
         
         % Pass index filtering
@@ -319,8 +405,20 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
         
         % Next region filtering (requires looking ahead)
         passesNextRegion = true;
-        if ~isempty(nextRegion) && i < length(EEG.event) && isfield(EEG.event(i+1), 'current_region')
-            passesNextRegion = strcmp(EEG.event(i+1).current_region, nextRegion);
+        if ~isempty(nextRegion)
+            % Look ahead to find the next fixation event, not just the next event
+            nextFixationFound = false;
+            for j = i+1:length(EEG.event)
+                if startsWith(EEG.event(j).type, 'R_fixation') && isfield(EEG.event(j), 'current_region')
+                    nextFixationFound = true;
+                    passesNextRegion = strcmp(EEG.event(j).current_region, nextRegion);
+                    break; % Stop after finding the next fixation
+                end
+            end
+            % If no next fixation was found, this can't pass the next region filter
+            if ~nextFixationFound
+                passesNextRegion = false;
+            end
         end
         
         % Fixation type filtering
@@ -346,20 +444,89 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             end
         end
         
-        % Keep event if it passes all filters
-        keepEvent(i) = passesTimeWindow && passesPassIndex && ...
-                       passesPrevRegion && passesNextRegion && ...
-                       passesFixationType && passesSaccadeDirection;
+        % Check if the event passes all filters
+        passes = passesPassIndex && passesPrevRegion && passesNextRegion && ...
+                 passesFixationType && passesSaccadeDirection;
+        
+        % Add debug information for important events
+        if isfield(evt, 'current_region') && any(strcmp(evt.current_region, timeLockedRegions))
+            fprintf('\nDebug Info for Event %d (type: %s):\n', i, evt.type);
+            fprintf('  Region: %s\n', evt.current_region);
+            if isfield(evt, 'is_first_pass_region')
+                fprintf('  First Pass: %s\n', mat2str(evt.is_first_pass_region));
+            end
+            if isfield(evt, 'total_fixations_in_region')
+                fprintf('  Total Fixations in Region: %d\n', evt.total_fixations_in_region);
+            end
+            if isfield(evt, 'previous_region')
+                fprintf('  Previous Region: %s\n', evt.previous_region);
+            end
+            
+            % Find the next fixation and report it
+            nextFixRegion = 'None';
+            for j = i+1:length(EEG.event)
+                if startsWith(EEG.event(j).type, 'R_fixation') && isfield(EEG.event(j), 'current_region')
+                    nextFixRegion = EEG.event(j).current_region;
+                    fprintf('  Next Fixation: Event %d in region %s\n', j, nextFixRegion);
+                    break;
+                end
+            end
+            
+            % Report filter status
+            fprintf('  Filter Results:\n');
+            fprintf('    Passes Time-Locked Region: %s\n', mat2str(passesTimeLockedRegion));
+            fprintf('    Passes Pass Index: %s\n', mat2str(passesPassIndex));
+            fprintf('    Passes Previous Region: %s\n', mat2str(passesPrevRegion));
+            fprintf('    Passes Next Region: %s\n', mat2str(passesNextRegion));
+            fprintf('    Passes Fixation Type: %s\n', mat2str(passesFixationType));
+            fprintf('    Passes Saccade Direction: %s\n', mat2str(passesSaccadeDirection));
+            fprintf('    Overall Result: %s\n', mat2str(passes));
+        end
+        
+        % If the event passes all filters, update its type code
+        if passes
+            matchedEventCount = matchedEventCount + 1;
+            
+            % Generate the 6-digit event code:
+            
+            % 1. First 2 digits: Last two digits of the condition number
+            condStr = '';
+            if isfield(evt, 'condition_number') && ~isempty(evt.condition_number)
+                condNum = evt.condition_number;
+                % Extract last two digits (or pad with zeros if needed)
+                condStr = sprintf('%02d', mod(condNum, 100));
+            else
+                condStr = '00'; % Default if no condition number
+            end
+            
+            % 2. Middle 2 digits: Region code
+            regionStr = '';
+            if isfield(evt, 'current_region') && ~isempty(evt.current_region) && isKey(regionCodeMap, evt.current_region)
+                regionStr = regionCodeMap(evt.current_region);
+            else
+                regionStr = '00'; % Default if no region
+            end
+            
+            % 3. Last 2 digits: Filter code (using the current filter count)
+            filterStr = sprintf('%02d', filterCount);
+            
+            % Combine to create the 6-digit code
+            newType = sprintf('%s%s%s', condStr, regionStr, filterStr);
+            
+            % Update the event type
+            filteredEEG.event(i).type = newType;
+            
+            % Also store the filter information in a more accessible format
+            filteredEEG.event(i).eyesort_condition_code = condStr;
+            filteredEEG.event(i).eyesort_region_code = regionStr;
+            filteredEEG.event(i).eyesort_filter_code = filterStr;
+            filteredEEG.event(i).eyesort_full_code = newType;
+        end
     end
     
-    % Filter events
-    filteredEEG.event = EEG.event(keepEvent);
+    % Store the number of matched events for reference
+    filteredEEG.eyesort_last_filter_matched_count = matchedEventCount;
     
-    % Update event count if that field exists
-    if isfield(filteredEEG, 'eventcounter')
-        filteredEEG.eventcounter = length(filteredEEG.event);
-    end
-    
-    % Return the filtered dataset
+    % Return the filtered dataset with all events intact
     return;
 end 

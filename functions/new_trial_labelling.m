@@ -104,16 +104,7 @@ function EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, i
         %%%%%%%%%%%%%% 
         % Check for trial end
         elseif strcmp(eventType, endCode)
-            % At the end of the trial, if we are still in the Ending region and no regression was flagged,
-            % mark all stored fixations as non-regression (Behavior 01).
-            if inEndRegion && ~hasRegressionBeenFound(currentTrial)
-                for j = 1:endRegionFixationCount
-                    fixIdx = endRegionFixations(j);
-                    condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                    EEG.event(fixIdx).type = sprintf('%s0401', condStr);
-                end
-            end
-            % Clear the Ending-region storage.
+            % Reset tracking at the end of the trial
             inEndRegion = false;
             endRegionFixationCount = 0;
             endRegionFixations = [];
@@ -208,9 +199,9 @@ function EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, i
                         EEG.event(iEvt).item_number = currentItem;
                         EEG.event(iEvt).condition_number = currentCond;
 
-                        %% ======= Handle the ENDING region behavior codes =======
+                        %% ======= Track ENDING region regression information =======
                         if strcmp(EEG.event(iEvt).current_region, 'Ending')
-                            % (A) We are in the Ending region: add this fixation to our storage.
+                            % We are in the Ending region: add this fixation to our storage.
                             if ~inEndRegion
                                 inEndRegion = true;
                                 endRegionFixationCount = 0;
@@ -234,38 +225,10 @@ function EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, i
                                             EEG.event(k).is_regression_trial = true;
                                         end
                                     end
-                                    
-                                    % For word-level regressions, we want to label the fixation immediately 
-                                    % preceding the trigger as Behavior 03. If more than one fixation was stored,
-                                    % label fixations 1 to (N-1) accordingly.
-                                    if endRegionFixationCount > 1
-                                        % Label earlier fixations in the Ending region:
-                                        for j = 1:(endRegionFixationCount - 1)
-                                            fixIdx = endRegionFixations(j);
-                                            condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                                            if j == (endRegionFixationCount - 1)
-                                                % The fixation immediately before the triggering fixation gets Behavior 03.
-                                                EEG.event(fixIdx).type = sprintf('%s0403', condStr);
-                                            else
-                                                % All earlier fixations get Behavior 02.
-                                                EEG.event(fixIdx).type = sprintf('%s0402', condStr);
-                                            end
-                                        end
-                                    else
-                                        % Only one fixation is stored, so assign it directly as Behavior 03.
-                                        fixIdx = endRegionFixations(1);
-                                        condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                                        EEG.event(fixIdx).type = sprintf('%s0403', condStr);
-                                    end
-                                    
-                                    % Clear the Ending-region storage now that the regression has been processed.
-                                    inEndRegion = false;
-                                    endRegionFixationCount = 0;
-                                    endRegionFixations = [];
                                 end
                             end
                         else
-                            % (B) The current fixation is not in Ending.
+                            % The current fixation is not in Ending.
                             % If we were collecting Ending-region fixations and no regression was yet flagged,
                             % then a regression out of the Ending region has occurred.
                             if inEndRegion && ~hasRegressionBeenFound(currentTrial)
@@ -276,23 +239,14 @@ function EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, i
                                         EEG.event(k).is_regression_trial = true;
                                     end
                                 end
-                                % Label the stored Ending-region fixations:
-                                for j = 1:endRegionFixationCount
-                                    fixIdx = endRegionFixations(j);
-                                    condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                                    if j == endRegionFixationCount
-                                        EEG.event(fixIdx).type = sprintf('%s0403', condStr);
-                                    else
-                                        EEG.event(fixIdx).type = sprintf('%s0402', condStr);
-                                    end
-                                end
+                                
                                 % Clear the Ending-region storage.
                                 inEndRegion = false;
                                 endRegionFixationCount = 0;
                                 endRegionFixations = [];
                             end
                         end
-                        %% ======= End of ENDING region behavior coding =======
+                        %% ======= End of ENDING region regression tracking =======
 
                         % Now update the previous trackers AFTER handling the Ending region behavior.
                         previousWord = currentWord;
