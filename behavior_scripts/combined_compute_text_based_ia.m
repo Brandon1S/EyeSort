@@ -39,17 +39,80 @@ function EEG = combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerCha
     end
     data = readtable(txtFilePath, opts);
     
-    % Display first few rows of condition and item columns
-    fprintf('\nFirst few rows of condition and item data:\n');
-    head_data = head(data);
-    disp([head_data.(conditionColName), head_data.(itemColName)]);
+    % Enhanced check for column existence - this is critical to fix the error
+    columnNames = data.Properties.VariableNames;
+    fprintf('Data file contains columns: %s\n', strjoin(columnNames, ', '));
     
-    % Check if condition and item columns need $ prefix
-    if ~ismember(conditionColName, data.Properties.VariableNames)
-        conditionColName = ['$' conditionColName];
+    % Make sure conditionColName exists in the data
+    if ~ismember(conditionColName, columnNames)
+        % If the column name doesn't match directly, try to find a similar one
+        if ismember(['$' conditionColName], columnNames)
+            conditionColName = ['$' conditionColName];
+            fprintf('Using column name with $ prefix: %s\n', conditionColName);
+        elseif ismember(strrep(conditionColName, '$', ''), columnNames)
+            conditionColName = strrep(conditionColName, '$', '');
+            fprintf('Using column name without $ prefix: %s\n', conditionColName);
+        else
+            % Try case-insensitive matching as a last resort
+            for i = 1:length(columnNames)
+                if strcmpi(columnNames{i}, conditionColName) || ...
+                   strcmpi(columnNames{i}, ['$' conditionColName]) || ...
+                   strcmpi(columnNames{i}, strrep(conditionColName, '$', ''))
+                    conditionColName = columnNames{i};
+                    fprintf('Using case-insensitive match for condition column: %s\n', conditionColName);
+                    break;
+                end
+            end
+            
+            % If we still don't have a match, raise an error
+            if ~ismember(conditionColName, columnNames)
+                error('Condition column "%s" not found in the data. Available columns: %s', ...
+                      conditionColName, strjoin(columnNames, ', '));
+            end
+        end
     end
-    if ~ismember(itemColName, data.Properties.VariableNames)
-        itemColName = ['$' itemColName];
+    
+    % Same check for itemColName
+    if ~ismember(itemColName, columnNames)
+        % If the column name doesn't match directly, try to find a similar one
+        if ismember(['$' itemColName], columnNames)
+            itemColName = ['$' itemColName];
+            fprintf('Using column name with $ prefix: %s\n', itemColName);
+        elseif ismember(strrep(itemColName, '$', ''), columnNames)
+            itemColName = strrep(itemColName, '$', '');
+            fprintf('Using column name without $ prefix: %s\n', itemColName);
+        else
+            % Try case-insensitive matching as a last resort
+            for i = 1:length(columnNames)
+                if strcmpi(columnNames{i}, itemColName) || ...
+                   strcmpi(columnNames{i}, ['$' itemColName]) || ...
+                   strcmpi(columnNames{i}, strrep(itemColName, '$', ''))
+                    itemColName = columnNames{i};
+                    fprintf('Using case-insensitive match for item column: %s\n', itemColName);
+                    break;
+                end
+            end
+            
+            % If we still don't have a match, raise an error
+            if ~ismember(itemColName, columnNames)
+                error('Item column "%s" not found in the data. Available columns: %s', ...
+                      itemColName, strjoin(columnNames, ', '));
+            end
+        end
+    end
+    
+    % Now safely display the first few rows with the confirmed column names
+    try
+        fprintf('\nFirst few rows of condition and item data:\n');
+        head_data = head(data);
+        condValues = head_data.(conditionColName);
+        itemValues = head_data.(itemColName);
+        for i = 1:length(condValues)
+            fprintf('Row %d: Condition = %d, Item = %d\n', i, condValues(i), itemValues(i));
+        end
+    catch ME
+        fprintf('Warning: Error displaying data preview: %s\n', ME.message);
+        fprintf('Continuing with processing anyway...\n');
     end
     
     % Initialize mapping containers for storing boundaries
@@ -254,7 +317,7 @@ function EEG = combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerCha
         end
     end
 
-    fprintf('Finished processing events.\n');
+    fprintf('Finished processing events. Boundaries assigned to %d events\n', numAssigned);
 end
 
 %{
