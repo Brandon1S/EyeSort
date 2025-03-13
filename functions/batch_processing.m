@@ -1,4 +1,4 @@
-%% batch_process_example.m
+%% batch_processing.m
 % This script loads multiple EEG .set files, processes each with text interest
 % area definitions and trial labeling, then uses a filter GUI to capture filter 
 % parameters and applies filtering across all datasets (potentially multiple times).
@@ -12,7 +12,7 @@ if ~exist('eeglab', 'file')
     error('EEGLAB not found in path. Please run EEGLAB first.');
 end
 [ALLEEG, EEG, CURRENTSET, ALLCOM] = eeglab;
-close(gcf);  % Close the EEGLAB GUI window
+%close(gcf);  % Close the EEGLAB GUI window
 
 %% Step 1: Load all datasets from the specified folder
 datasetDir = '/Users/brandon/Datasets/Electric_Datasets/electric_eyel_small';

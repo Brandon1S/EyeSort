@@ -1,0 +1,167 @@
+function [EEG, com] = pop_generate_bdf(EEG)
+% POP_GENERATE_BDF - GUI wrapper for generate_bdf_file function
+%
+% Usage:
+%   >> [EEG, com] = pop_generate_bdf(EEG);
+%
+% Inputs:
+%   EEG   - EEGLAB EEG structure or ALLEEG array with filtered events
+%
+% Outputs:
+%   EEG   - Same as input EEG
+%   com   - Command string for EEGLAB history
+%
+% This function presents a GUI to create a BINLISTER Bin Descriptor File (BDF)
+% from filtered events in EEG datasets. The BDF file can then be used with 
+% EEGLAB's BINLISTER function for further processing.
+%
+% See also: generate_bdf_file, pop_filter_datasets
+
+    % Initialize output
+    com = '';
+    
+    % If no EEG input, try to get it from base workspace
+    if nargin < 1
+        try
+            EEG = evalin('base', 'EEG');
+        catch
+            try
+                EEG = evalin('base', 'ALLEEG');
+            catch
+                errordlg('No EEG or ALLEEG found in EEGLAB workspace.', 'Error');
+                return;
+            end
+        end
+    end
+    
+    % Validate input
+    if isempty(EEG)
+        errordlg('EEG dataset is empty. Please load filtered datasets first.', 'Error');
+        return;
+    end
+    
+    % Check if EEG is filtered
+    hasFilteredEvents = false;
+    
+    if length(EEG) > 1
+        % Check multiple datasets
+        for i = 1:length(EEG)
+            if ~isempty(EEG(i)) && isfield(EEG(i), 'event') && ~isempty(EEG(i).event)
+                % Check for 6-digit event codes (filtered events)
+                for j = 1:length(EEG(i).event)
+                    if isfield(EEG(i).event(j), 'type') && ischar(EEG(i).event(j).type) && ...
+                            length(EEG(i).event(j).type) == 6 && all(isstrprop(EEG(i).event(j).type, 'digit'))
+                        hasFilteredEvents = true;
+                        break;
+                    end
+                end
+                if hasFilteredEvents
+                    break;
+                end
+            end
+        end
+    else
+        % Check single dataset
+        if isfield(EEG, 'event') && ~isempty(EEG.event)
+            for i = 1:length(EEG.event)
+                if isfield(EEG.event(i), 'type') && ischar(EEG.event(i).type) && ...
+                        length(EEG.event(i).type) == 6 && all(isstrprop(EEG.event(i).type, 'digit'))
+                    hasFilteredEvents = true;
+                    break;
+                end
+            end
+        end
+    end
+    
+    if ~hasFilteredEvents
+        errordlg('No filtered events found in the dataset(s). Please run filtering first.', 'Error');
+        return;
+    end
+    
+    % Create the figure for the GUI
+    hFig = figure('Name','Generate BINLISTER BDF File', ...
+                  'NumberTitle','off', ...
+                  'MenuBar','none', ...
+                  'ToolBar','none', ...
+                  'Color',[0.94 0.94 0.94], ...
+                  'Resize', 'off', ...
+                  'Position', [300 300 450 250]);
+    
+    % Define the UI controls
+    uicontrol('Style', 'text', ...
+              'String', 'Generate BINLISTER Bin Descriptor File', ...
+              'FontSize', 14, ...
+              'FontWeight', 'bold', ...
+              'Position', [20 200 410 30]);
+          
+    % Description text
+    uicontrol('Style', 'text', ...
+              'String', ['This will analyze the 6-digit filter codes in your filtered datasets ' ...
+                         'and create a BINLISTER compatible bin descriptor file (BDF).' char(10) ...
+                         'The BDF can be used with BINLISTER for further analysis.'], ...
+              'Position', [20 130 410 60], ...
+              'HorizontalAlignment', 'left');
+    
+    % Dataset info text
+    if length(EEG) > 1
+        datasetText = sprintf('Analyzing %d filtered datasets', length(EEG));
+    else
+        datasetText = 'Analyzing current filtered dataset';
+    end
+    
+    uicontrol('Style', 'text', ...
+              'String', datasetText, ...
+              'Position', [20 100 410 20], ...
+              'HorizontalAlignment', 'left', ...
+              'FontWeight', 'bold');
+    
+    % Buttons
+    uicontrol('Style', 'pushbutton', ...
+              'String', 'Cancel', ...
+              'Position', [120 20 100 40], ...
+              'Callback', @cancelCallback);
+          
+    uicontrol('Style', 'pushbutton', ...
+              'String', 'Generate BDF', ...
+              'Position', [230 20 100 40], ...
+              'Callback', @generateCallback);
+    
+    % Wait for user interaction
+    uiwait(hFig);
+    
+    % Callback functions
+    function cancelCallback(~, ~)
+        close(hFig);
+    end
+    
+    function generateCallback(~, ~)
+        try
+            % Ask for output file location
+            [fileName, filePath] = uiputfile({'*.txt', 'Text Files (*.txt)'; '*.*', 'All Files'}, ...
+                'Save BDF File', 'eyesort_bins.txt');
+            
+            if fileName == 0
+                % User cancelled
+                return;
+            end
+            
+            outputFile = fullfile(filePath, fileName);
+            
+            % Close the dialog
+            close(hFig);
+            
+            % Generate BDF file
+            generate_bdf_file(EEG, outputFile);
+            
+            % Create command string for history
+            com = sprintf('EEG = pop_generate_bdf(EEG);');
+            
+            % Show success message
+            msgbox(sprintf('BDF file created successfully at:\n%s', outputFile), 'Success');
+            
+        catch ME
+            % Error handling
+            errordlg(['Error generating BDF file: ' ME.message], 'Error');
+        end
+    end
+end 

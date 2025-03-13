@@ -75,6 +75,14 @@ function currvers = eegplugin_eyesort(fig, ~, ~)
             uimenu(submenu, 'label', 'Filter Datasets', 'separator', 'on', ...
                 'callback', @(src,event) try_callback(@pop_filter_datasets, src, event));
             
+            % Add the new BDF generator menu item
+            uimenu(submenu, 'label', 'Generate BINLISTER BDF File', 'separator', 'on', ...
+                'callback', @(src,event) try_callback(@pop_generate_bdf, src, event));
+            
+            % Add menu item to save filtered datasets
+            uimenu(submenu, 'label', 'Save Filtered Datasets', 'separator', 'on', ...
+                'callback', @(src,event) try_callback(@save_all_filtered_datasets, src, event));
+            
             uimenu(submenu, 'label', 'Help', 'separator', 'on', ...
                    'callback', @(src,event) try_callback(@help_button, src, event));
 
