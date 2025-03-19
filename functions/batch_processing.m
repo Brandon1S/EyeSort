@@ -53,6 +53,13 @@ endCode            = 'S255';   % End trigger code
 conditionTriggers  = {'S211','S213','S221','S223'};
 itemTriggers       = arrayfun(@(x) ['S' num2str(x)], 1:112, 'UniformOutput', false);
 
+% Define eyetracking field names - required parameters
+fixationType = 'R_fixation';                % The event type for fixations
+fixationXField = 'fix_avgpos_x';            % The field containing x-coordinate for fixations
+saccadeType = 'R_saccade';                  % The event type for saccades
+saccadeStartXField = 'sac_startpos_x';      % The field containing saccade start x-coordinate
+saccadeEndXField = 'sac_endpos_x';          % The field containing saccade end x-coordinate
+
 % --- Determine actual column names from the text file ---
 try
     opts = detectImportOptions(txtFilePath, 'Delimiter', '\t');
@@ -94,10 +101,11 @@ for i = 1:length(processedEEGs)
         
         EEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                           numRegions, regionNames, conditionColName, itemColName, ...
-                          startCode, endCode, conditionTriggers, itemTriggers);
-        EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, itemTriggers);
+                          startCode, endCode, conditionTriggers, itemTriggers, ...
+                          fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
         
-        EEG.region_names = regionNames;
+        % No need to call new_trial_labelling separately, it's now called inside new_combined_compute_text_based_ia
+        
         processedEEGs{i} = EEG;
         fprintf('Dataset %d processed successfully.\n', i);
     catch ME
@@ -122,6 +130,12 @@ for i = 1:length(ALLEEG)
     if ~isempty(ALLEEG(i)) && isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event)
         fprintf('Dataset %d: %s, Event count: %d\n', i, ALLEEG(i).setname, length(ALLEEG(i).event));
         % Check for specific filtering fields
+        if isfield(ALLEEG(i), 'eyesort_field_names')
+            fprintf('  Has field name definitions: Yes\n');
+            fprintf('  Fixation Type: %s, X Field: %s\n', ALLEEG(i).eyesort_field_names.fixationType, ALLEEG(i).eyesort_field_names.fixationXField);
+        else
+            fprintf('  Has field name definitions: No\n');
+        end
         if isfield(ALLEEG(i), 'eyesort_filter_descriptions')
             fprintf('  Has filter descriptions: Yes\n');
         else
@@ -133,7 +147,7 @@ end
 % Find a valid dataset (with region boundaries) to use for launching the filter GUI.
 validDatasetIdx = [];
 for i = 1:length(ALLEEG)
-    if isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event)
+    if isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event) && isfield(ALLEEG(i), 'eyesort_field_names')
         % Check if any event in this dataset has non-empty regionBoundaries
         if any(arrayfun(@(ev) isfield(ev, 'regionBoundaries') && ~isempty(ev.regionBoundaries), ALLEEG(i).event))
             validDatasetIdx(end+1) = i;
@@ -142,7 +156,7 @@ for i = 1:length(ALLEEG)
 end
 
 if isempty(validDatasetIdx)
-    error('No valid dataset with region boundaries found. Please check processing.');
+    error('No valid dataset with region boundaries and field name definitions found. Please check processing.');
 end
 
 fprintf('\n--- Starting Interactive Filtering Session ---\n');
@@ -221,7 +235,22 @@ else
             filterParams.prevRegion = filterDesc.prev_region;
             filterParams.nextRegion = filterDesc.next_region;
             filterParams.fixationType = filterDesc.fixation_value;
-            filterParams.saccadeDirection = filterDesc.saccade_value;
+            
+            % Handle both old and new field names for saccade direction parameters
+            if isfield(filterDesc, 'saccade_value')
+                % Old format - single saccade direction
+                filterParams.saccadeInDirection = filterDesc.saccade_value;
+                filterParams.saccadeOutDirection = 1; % Default to "Any direction"
+            elseif isfield(filterDesc, 'saccade_in_value')
+                % New format - separate in/out directions
+                filterParams.saccadeInDirection = filterDesc.saccade_in_value;
+                filterParams.saccadeOutDirection = filterDesc.saccade_out_value;
+            else
+                % Fallback defaults
+                filterParams.saccadeInDirection = 1; % Any direction
+                filterParams.saccadeOutDirection = 1; % Any direction
+            end
+            
             filterParams.filterCount = filterIdx;
             
             % Set filter code to be 1-indexed (01, 02, 03, etc.)

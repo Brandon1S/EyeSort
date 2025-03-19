@@ -29,6 +29,18 @@ function [EEG, com] = pop_filter_datasets(EEG)
         EEG.eyesort_filter_count = 0;
     end
     
+    % Get event type field names from EEG structure - these must exist
+    if ~isfield(EEG, 'eyesort_field_names')
+        errordlg('EEG data does not contain field name information. Please process with the Text Interest Areas function first.', 'Error');
+        return;
+    end
+    
+    fixationType = EEG.eyesort_field_names.fixationType;
+    fixationXField = EEG.eyesort_field_names.fixationXField;
+    saccadeType = EEG.eyesort_field_names.saccadeType;
+    saccadeStartXField = EEG.eyesort_field_names.saccadeStartXField;
+    saccadeEndXField = EEG.eyesort_field_names.saccadeEndXField;
+    
     % Extract available filtering options from EEG events
     conditionSet = [];
     itemSet = [];
@@ -56,16 +68,41 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
         itemSet = unique(itemVals(~isnan(itemVals) & itemVals > 0));
     end
-    if isfield(EEG.event, 'current_region')
-        for ii = 1:length(EEG.event)
-            if isfield(EEG.event(ii), 'current_region') && ~isempty(EEG.event(ii).current_region)
-                regionNames{end+1} = EEG.event(ii).current_region;
+    
+    % Extract region names, maintaining user-specified order
+    if isfield(EEG, 'region_names') && ~isempty(EEG.region_names)
+        % If the dataset has explicitly defined region order, use it
+        fprintf('Using region_names field from EEG structure for ordered regions\n');
+        regionNames = EEG.region_names;
+        if ischar(regionNames)
+            regionNames = {regionNames}; % Convert to cell array if it's a string
+        end
+    else
+        % Otherwise extract from events but preserve order of first appearance
+        fprintf('No region_names field found, extracting from events and preserving order\n');
+        seen = containers.Map('KeyType', 'char', 'ValueType', 'logical');
+        if isfield(EEG.event, 'current_region')
+            for ii = 1:length(EEG.event)
+                if isfield(EEG.event(ii), 'current_region') && ~isempty(EEG.event(ii).current_region)
+                    regionName = EEG.event(ii).current_region;
+                    % Only add each region once, preserving order of first appearance
+                    if ~isKey(seen, regionName)
+                        seen(regionName) = true;
+                        regionNames{end+1} = regionName;
+                    end
+                end
             end
         end
-        regionNames = unique(regionNames);
     end
+    
     if isempty(regionNames)
         regionNames = {'No regions found'};
+    end
+    
+    % Print regions in order for verification
+    fprintf('\nRegions in order (as will be displayed in listbox):\n');
+    for i = 1:length(regionNames)
+        fprintf('%d. %s\n', i, regionNames{i});
     end
     
     % Create the figure for the GUI
@@ -79,6 +116,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     % Define the layout (geomhoriz) and UI controls (uilist)
     geomhoriz = { ...
         1, ...
+        [2 1], ...
         [2 1], ...
         [2 1], ...
         [2 1], ...
@@ -101,8 +139,10 @@ function [EEG, com] = pop_filter_datasets(EEG)
         {'Style','popupmenu','String',['Any region', regionNames], 'tag','popNextRegion'}, ...
         {'Style','text','String','Fixation Type:'}, ...
         {'Style','popupmenu','String',{'Any fixation', 'First in region', 'Single fixation', 'Multiple fixations'}, 'tag','popFixationType'}, ...
-        {'Style','text','String','Saccade Direction:'}, ...
-        {'Style','popupmenu','String',{'Any direction', 'Forward only', 'Backward only'}, 'tag','popSaccadeDirection'}, ...
+        {'Style','text','String','Saccade In Direction:'}, ...
+        {'Style','popupmenu','String',{'Any direction', 'Forward only', 'Backward only', 'Both'}, 'tag','popSaccadeInDirection'}, ...
+        {'Style','text','String','Saccade Out Direction:'}, ...
+        {'Style','popupmenu','String',{'Any direction', 'Forward only', 'Backward only', 'Both'}, 'tag','popSaccadeOutDirection'}, ...
         {}, ...
         {}, ...
         {'Style', 'pushbutton', 'String', 'Cancel', 'callback', @(~,~) cancel_button}, ...
@@ -156,7 +196,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         prevRegionOption = get(findobj('tag','popPrevRegion'), 'Value');
         nextRegionOption = get(findobj('tag','popNextRegion'), 'Value');
         fixationTypeOption = get(findobj('tag','popFixationType'), 'Value');
-        saccadeDirectionOption = get(findobj('tag','popSaccadeDirection'), 'Value');
+        saccadeInDirectionOption = get(findobj('tag','popSaccadeInDirection'), 'Value');
+        saccadeOutDirectionOption = get(findobj('tag','popSaccadeOutDirection'), 'Value');
         
         % Check for valid region data
         if strcmp(regionNames{1}, 'No regions found')
@@ -188,7 +229,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
         try
             filteredEEG = filter_dataset(EEG, conditionSet, itemSet, timeLockedRegionValues, ...
                                          passIndexOption, prevRegion, nextRegion, ...
-                                         fixationTypeOption, saccadeDirectionOption, currentFilterCount);
+                                         fixationTypeOption, saccadeInDirectionOption, saccadeOutDirectionOption, currentFilterCount, ...
+                                         fixationType, fixationXField, saccadeType, ...
+                                         saccadeStartXField, saccadeEndXField);
             filteredEEG.eyesort_filter_count = currentFilterCount;
             if ~isfield(filteredEEG, 'eyesort_filter_descriptions')
                 filteredEEG.eyesort_filter_descriptions = {};
@@ -204,8 +247,10 @@ function [EEG, com] = pop_filter_datasets(EEG)
             filterDesc.next_region = nextRegion;
             filterDesc.fixation_type = get(findobj('tag','popFixationType'), 'String');
             filterDesc.fixation_value = fixationTypeOption;
-            filterDesc.saccade_dir = get(findobj('tag','popSaccadeDirection'), 'String');
-            filterDesc.saccade_value = saccadeDirectionOption;
+            filterDesc.saccade_in_dir = get(findobj('tag','popSaccadeInDirection'), 'String');
+            filterDesc.saccade_in_value = saccadeInDirectionOption;
+            filterDesc.saccade_out_dir = get(findobj('tag','popSaccadeOutDirection'), 'String');
+            filterDesc.saccade_out_value = saccadeOutDirectionOption;
             filterDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
             
             filteredEEG.eyesort_filter_descriptions{end+1} = filterDesc;
@@ -263,7 +308,10 @@ end
 
 function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions, ...
                                      passIndexOption, prevRegion, nextRegion, ...
-                                     fixationTypeOption, saccadeDirectionOption, filterCount)
+                                     fixationTypeOption, saccadeInDirectionOption, ...
+                                     saccadeOutDirectionOption, filterCount, ...
+                                     fixationType, fixationXField, saccadeType, ...
+                                     saccadeStartXField, saccadeEndXField)
     % Create a copy of the EEG structure
     filteredEEG = EEG;
     
@@ -313,7 +361,7 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
         
         % Only process fixation events for potential code updates
         % Non-fixation events remain unchanged
-        if ~startsWith(evt.type, 'R_fixation')
+        if ~startsWith(evt.type, fixationType)
             continue;
         end
         
@@ -369,7 +417,7 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             % Look ahead to find the next fixation event, not just the next event
             nextFixationFound = false;
             for jj = i+1:length(EEG.event)
-                if startsWith(EEG.event(jj).type, 'R_fixation') && isfield(EEG.event(jj), 'current_region')
+                if startsWith(EEG.event(jj).type, fixationType) && isfield(EEG.event(jj), 'current_region')
                     nextFixationFound = true;
                     passesNextRegion = strcmp(EEG.event(jj).current_region, nextRegion);
                     break; % Stop after finding the next fixation
@@ -394,19 +442,61 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             end
         end
         
-        % Saccade direction filtering
-        passesSaccadeDirection = true;
-        if saccadeDirectionOption > 1 && isfield(evt, 'is_word_regression')
-            if saccadeDirectionOption == 2 % Forward only
-                passesSaccadeDirection = ~evt.is_word_regression;
-            elseif saccadeDirectionOption == 3 % Backward only
-                passesSaccadeDirection = evt.is_word_regression;
+        % Saccade in direction filtering (looking at actual saccade before current fixation)
+        passesSaccadeInDirection = true;
+        if saccadeInDirectionOption > 1
+            % Find the saccade that led to this fixation
+            inSaccadeFound = false;
+            for jj = i-1:-1:1
+                if strcmp(EEG.event(jj).type, saccadeType)
+                    inSaccadeFound = true;
+                    % Calculate X-direction movement using saccade position data
+                    xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                    isForward = xChange > 0;
+                    
+                    % Check against filter options
+                    if saccadeInDirectionOption == 2 % Forward only
+                        passesSaccadeInDirection = isForward && abs(xChange) > 10; % Threshold to ignore tiny movements
+                    elseif saccadeInDirectionOption == 3 % Backward only
+                        passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
+                    end
+                    break;
+                end
+            end
+            if ~inSaccadeFound && saccadeInDirectionOption < 4
+                passesSaccadeInDirection = false;
+            end
+        end
+        
+        % Saccade out direction filtering (looking at actual saccade after current fixation)
+        passesSaccadeOutDirection = true;
+        if saccadeOutDirectionOption > 1
+            % Find the saccade that followed this fixation
+            outSaccadeFound = false;
+            for jj = i+1:length(EEG.event)
+                if strcmp(EEG.event(jj).type, saccadeType)
+                    outSaccadeFound = true;
+                    % Calculate X-direction movement using saccade position data
+                    xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                    isForward = xChange > 0;
+                    
+                    % Check against filter options
+                    if saccadeOutDirectionOption == 2 % Forward only
+                        passesSaccadeOutDirection = isForward && abs(xChange) > 10;
+                    elseif saccadeOutDirectionOption == 3 % Backward only
+                        passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
+                    end
+                    break;
+                end
+            end
+            if ~outSaccadeFound && saccadeOutDirectionOption < 4
+                passesSaccadeOutDirection = false;
             end
         end
         
         % Check if the event passes all filters
         passes = passesPassIndex && passesPrevRegion && passesNextRegion && ...
-                 passesFixationType && passesSaccadeDirection;
+                 passesFixationType && passesSaccadeInDirection && passesSaccadeOutDirection;
         
         % Add debug information for important events
         if isfield(evt, 'current_region') && any(strcmp(evt.current_region, timeLockedRegions))
@@ -425,7 +515,7 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             % Find the next fixation and report it
             nextFixRegion = 'None';
             for jj = i+1:length(EEG.event)
-                if startsWith(EEG.event(jj).type, 'R_fixation') && isfield(EEG.event(jj), 'current_region')
+                if startsWith(EEG.event(jj).type, fixationType) && isfield(EEG.event(jj), 'current_region')
                     nextFixRegion = EEG.event(jj).current_region;
                     fprintf('  Next Fixation: Event %d in region %s\n', jj, nextFixRegion);
                     break;
@@ -439,7 +529,8 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             fprintf('    Passes Previous Region: %s\n', mat2str(passesPrevRegion));
             fprintf('    Passes Next Region: %s\n', mat2str(passesNextRegion));
             fprintf('    Passes Fixation Type: %s\n', mat2str(passesFixationType));
-            fprintf('    Passes Saccade Direction: %s\n', mat2str(passesSaccadeDirection));
+            fprintf('    Passes Saccade In Direction: %s\n', mat2str(passesSaccadeInDirection));
+            fprintf('    Passes Saccade Out Direction: %s\n', mat2str(passesSaccadeOutDirection));
             fprintf('    Overall Result: %s\n', mat2str(passes));
         end
         

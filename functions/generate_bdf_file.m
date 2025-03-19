@@ -170,6 +170,28 @@ function write_bdf_file(codeMap, outputFile)
     regionNameMap('03') = 'Target_word';
     regionNameMap('04') = 'Ending';
     
+    % Get filter descriptions from EEG structure if available
+    try
+        EEG = evalin('base', 'EEG');
+        hasFilterDescriptions = isfield(EEG, 'eyesort_filter_descriptions') && ~isempty(EEG.eyesort_filter_descriptions);
+        if hasFilterDescriptions
+            filterDescriptions = EEG.eyesort_filter_descriptions;
+            fprintf('Found %d filter descriptions in EEG structure, will include in BDF file.\n', length(filterDescriptions));
+            
+            % Debug: Print filter descriptions to help diagnose matching issues
+            for i = 1:length(filterDescriptions)
+                desc = filterDescriptions{i};
+                fprintf('Filter #%d: Code=%s, Number=%d\n', i, desc.filter_code, desc.filter_number);
+            end
+        else
+            filterDescriptions = [];
+            fprintf('No filter descriptions found in EEG structure.\n');
+        end
+    catch ME
+        fprintf('Error retrieving filter descriptions: %s\n', ME.message);
+        filterDescriptions = [];
+    end
+    
     % Process each condition
     for c = 1:length(conditionFields)
         condField = conditionFields{c};
@@ -194,18 +216,151 @@ function write_bdf_file(codeMap, outputFile)
             % Get all filter codes for this condition and region
             filterCodes = codeMap.(condField).(regionField);
             
-            % Format all codes with semicolons for this bin
-            codesString = strjoin(filterCodes, ';');
-            
-            % Create descriptive bin name based on condition and region
-            binDescription = sprintf('Condition %s, %s', condCode, regionName);
-            
-            % Write bin in BINLISTER format
-            fprintf(fileID, 'Bin %d\n', binNum);
-            fprintf(fileID, '%s\n', binDescription);
-            fprintf(fileID, '.{%s}\n\n', codesString);
-            
-            binNum = binNum + 1;
+            % Process each filter code to create detailed description
+            for f = 1:length(filterCodes)
+                currentCode = filterCodes{f};
+                filterCode = currentCode(5:6); % Last 2 digits are the filter code
+                
+                % Debug: Show what we're looking for
+                fprintf('Looking for filter code %s in %d descriptions\n', filterCode, length(filterDescriptions));
+                
+                % Create base descriptive bin name
+                baseDescription = sprintf('Condition %s, %s', condCode, regionName);
+                
+                % Try to find detailed filter description
+                detailedDescription = '';
+                if ~isempty(filterDescriptions)
+                    filterFound = false;
+                    
+                    % Look for matching filter code in filter descriptions
+                    for d = 1:length(filterDescriptions)
+                        % Try multiple ways to match the filter code
+                        isMatch = false;
+                        
+                        if isfield(filterDescriptions{d}, 'filter_code') && ...
+                           strcmp(filterDescriptions{d}.filter_code, filterCode)
+                            isMatch = true;
+                        elseif isfield(filterDescriptions{d}, 'filter_number') && ...
+                              filterDescriptions{d}.filter_number == str2double(filterCode)
+                            isMatch = true;
+                        end
+                        
+                        if isMatch
+                            fprintf('  Found matching filter description at index %d\n', d);
+                            filterFound = true;
+                            desc = filterDescriptions{d};
+                            
+                            % Build detailed description
+                            detailedDescription = baseDescription;
+                            
+                            % Add pass type information
+                            if isfield(desc, 'pass_value') && desc.pass_value > 1
+                                if isfield(desc, 'pass_type')
+                                    if iscell(desc.pass_type)
+                                        detailedDescription = [detailedDescription ', ' desc.pass_type{desc.pass_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', Pass: ' num2str(desc.pass_value)];
+                                    end
+                                else
+                                    % Fallback to standard descriptions if pass_type field is missing
+                                    passLabels = {'Any pass', 'First pass only', 'Not first pass'};
+                                    if desc.pass_value <= length(passLabels)
+                                        detailedDescription = [detailedDescription ', ' passLabels{desc.pass_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', Pass: ' num2str(desc.pass_value)];
+                                    end
+                                end
+                            end
+                            
+                            % Add previous region information
+                            if isfield(desc, 'prev_region') && ~isempty(desc.prev_region)
+                                detailedDescription = [detailedDescription ', From: ' desc.prev_region];
+                            end
+                            
+                            % Add next region information
+                            if isfield(desc, 'next_region') && ~isempty(desc.next_region)
+                                detailedDescription = [detailedDescription ', To: ' desc.next_region];
+                            end
+                            
+                            % Add fixation type information
+                            if isfield(desc, 'fixation_value') && desc.fixation_value > 1
+                                if isfield(desc, 'fixation_type')
+                                    if iscell(desc.fixation_type)
+                                        detailedDescription = [detailedDescription ', ' desc.fixation_type{desc.fixation_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', Fix: ' num2str(desc.fixation_value)];
+                                    end
+                                else
+                                    % Fallback to standard descriptions if fixation_type field is missing
+                                    fixLabels = {'Any fixation', 'First in region', 'Single fixation', 'Multiple fixations'};
+                                    if desc.fixation_value <= length(fixLabels)
+                                        detailedDescription = [detailedDescription ', ' fixLabels{desc.fixation_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', Fix: ' num2str(desc.fixation_value)];
+                                    end
+                                end
+                            end
+                            
+                            % Add saccade in direction information
+                            if isfield(desc, 'saccade_in_value') && desc.saccade_in_value > 1
+                                if isfield(desc, 'saccade_in_dir')
+                                    if iscell(desc.saccade_in_dir)
+                                        detailedDescription = [detailedDescription ', SacIn: ' desc.saccade_in_dir{desc.saccade_in_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', SacIn: ' num2str(desc.saccade_in_value)];
+                                    end
+                                else
+                                    % Fallback to standard descriptions
+                                    sacLabels = {'Any direction', 'Forward only', 'Backward only', 'Both'};
+                                    if desc.saccade_in_value <= length(sacLabels)
+                                        detailedDescription = [detailedDescription ', SacIn: ' sacLabels{desc.saccade_in_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', SacIn: ' num2str(desc.saccade_in_value)];
+                                    end
+                                end
+                            end
+                            
+                            % Add saccade out direction information
+                            if isfield(desc, 'saccade_out_value') && desc.saccade_out_value > 1
+                                if isfield(desc, 'saccade_out_dir')
+                                    if iscell(desc.saccade_out_dir)
+                                        detailedDescription = [detailedDescription ', SacOut: ' desc.saccade_out_dir{desc.saccade_out_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', SacOut: ' num2str(desc.saccade_out_value)];
+                                    end
+                                else
+                                    % Fallback to standard descriptions
+                                    sacLabels = {'Any direction', 'Forward only', 'Backward only', 'Both'};
+                                    if desc.saccade_out_value <= length(sacLabels)
+                                        detailedDescription = [detailedDescription ', SacOut: ' sacLabels{desc.saccade_out_value}];
+                                    else
+                                        detailedDescription = [detailedDescription ', SacOut: ' num2str(desc.saccade_out_value)];
+                                    end
+                                end
+                            end
+                            
+                            break;
+                        end
+                    end
+                    
+                    if ~filterFound
+                        fprintf('  No matching filter description found for code %s\n', filterCode);
+                    end
+                end
+                
+                % If no detailed description was found, use the base description
+                if isempty(detailedDescription)
+                    detailedDescription = baseDescription;
+                    detailedDescription = [detailedDescription, sprintf(', Filter: %s', filterCode)];
+                end
+                
+                % Write bin in BINLISTER format with the detailed description
+                fprintf(fileID, 'Bin %d\n', binNum);
+                fprintf(fileID, '%s\n', detailedDescription);
+                fprintf(fileID, '.{%s}\n\n', currentCode);
+                
+                binNum = binNum + 1;
+            end
         end
     end
     

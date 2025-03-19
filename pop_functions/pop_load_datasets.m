@@ -49,16 +49,16 @@ function [EEG, com] = pop_load_datasets(EEG)
         [1 1 1 1.26], ... Row 10
     };
     
-    geomvert = [0.5, 0.5, 3, 0.5, 0.5, 0.7, 0.3, 0.7, 0.3, 0.7];
+    geomvert = [0.5, 0.5, 0.5, 0.5, 0.5, 0.7, 0.3, 0.7, 0.3, 0.7];
     
     uilist = { ...
         % Row 1: Input EEG datasets
-        {'Style', 'text', 'string', 'Load individual datasets:', 'FontSize', 12}, ...
+        {'Style', 'text', 'string', 'Load individual dataset:', 'FontSize', 12}, ...
         {}, ...
         {}, ...
         {'Style', 'pushbutton', 'string', 'Browse Files', 'callback', @(~,~) browse_for_datasets()}, ...
         ... Row 2: Selected Datasets label
-        {'Style', 'text', 'string', 'Selected Datasets:', 'FontSize', 10, 'HorizontalAlignment', 'left'}, ...
+        {'Style', 'text', 'string', 'Selected Dataset:', 'FontSize', 10, 'HorizontalAlignment', 'left'}, ...
         {}, ...
         ... Row 3: 
         {'Style', 'listbox', 'tag', 'datasetList', 'string', selected_datasets, 'Max', 10, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
@@ -226,26 +226,19 @@ function [EEG, com] = pop_load_datasets(EEG)
             h = waitbar(0, 'Processing datasets...', 'Name', 'Batch Processing');
             
             try
-                % KEY CHANGE: Use a cell array to process datasets outside of EEGLAB structures
-                % This is the same approach used in batch_process_example.m
-                processedEEGs = cell(1, length(fileList));
-                
                 % Process each dataset
                 for i = 1:length(fileList)
                     file_path = fullfile(selectedDir, fileList(i).name);
                     waitbar(i/length(fileList), h, sprintf('Processing %d of %d: %s', i, length(fileList), fileList(i).name));
                     
                     try
-                        % Load dataset directly into our cell array, not into ALLEEG yet
+                        % Load dataset
                         currentEEG = pop_loadset('filename', file_path);
                         
                         if isempty(currentEEG.data)
                             warning('Dataset %s is empty. Skipping...', file_path);
                             continue;
                         end
-                        
-                        % Store in our cell array for processing
-                        processedEEGs{i} = currentEEG;
                         
                         % Process using text interest areas & trial labeling would happen in later steps
                         % We're just loading the datasets here
@@ -267,34 +260,14 @@ function [EEG, com] = pop_load_datasets(EEG)
                 % Close progress bar
                 delete(h);
                 
-                % NOW transfer processed datasets to ALLEEG
-                fprintf('Transferring processed datasets to EEGLAB...\n');
-                for i = 1:length(processedEEGs)
-                    if ~isempty(processedEEGs{i})
-                        % Create a new dataset using eeg_store instead of pop_newset to avoid GUI issues
-                        [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, processedEEGs{i}, 0);
-                        fprintf('Dataset %d transferred to EEGLAB\n', i);
-                    end
-                end
-                
-                % Set the last loaded dataset as current if any were loaded
-                if ~isempty(ALLEEG)
-                    EEG = ALLEEG(end);
-                end
-                
-                % Update base workspace
-                assignin('base', 'ALLEEG', ALLEEG);
-                assignin('base', 'EEG', EEG);
-                assignin('base', 'CURRENTSET', CURRENTSET);
-                
-                % Refresh EEGLAB
-                eeglab('redraw');
+                % For batch processing, we don't load anything into ALLEEG
+                % This avoids EEGLAB detecting changes in the event structure
                 
                 % Build command string for history
                 com = sprintf('EEG = pop_load_datasets(EEG); %% Batch processed %d datasets', length(fileList));
                 
                 % Success message
-                msgbox(sprintf('Batch processing complete! Processed %d datasets.', length(fileList)), 'Success');
+                msgbox(sprintf('Batch processing complete! %d datasets processed and saved to output directory.\nNote: These files were not loaded into EEGLAB to avoid event structure conflicts.', length(fileList)), 'Success');
                 
             catch ME
                 % Close progress bar if there was an error

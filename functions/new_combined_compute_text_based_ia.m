@@ -1,6 +1,7 @@
 function EEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, ...
-                                              conditionColName, itemColName, startCode, endCode, conditionTriggers, itemTriggers)
+                                              conditionColName, itemColName, startCode, endCode, conditionTriggers, itemTriggers, ...
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
     % If EEG is an array (i.e., multiple datasets), process each in a loop.
     if numel(EEG) > 1
         for idx = 1:numel(EEG)
@@ -10,7 +11,8 @@ function EEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPe
             % Process the current dataset
             currentEEG = process_single_dataset(currentEEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
-                                              startCode, endCode, conditionTriggers, itemTriggers);
+                                              startCode, endCode, conditionTriggers, itemTriggers, ...
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
             
             % Store back in the array - NO SAVING
             EEG(idx) = currentEEG;
@@ -22,22 +24,28 @@ function EEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPe
     % Otherwise, process a single dataset
     EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
-                                              startCode, endCode, conditionTriggers, itemTriggers);
+                                              startCode, endCode, conditionTriggers, itemTriggers, ...
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
 end
 
 function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
-                                              startCode, endCode, conditionTriggers, itemTriggers)
+                                              startCode, endCode, conditionTriggers, itemTriggers, ...
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
     %% Validate inputs and read the interest area text file
-    if nargin < 12
-        error('compute_text_based_ia_word_level: Not enough input arguments.');
+    if nargin < 17
+        error('compute_text_based_ia_word_level: Not enough input arguments. Field names must be specified.');
     end
-    if isempty(EEG)
-        error('EEG is empty. Cannot proceed.');
-    end
-    if ~isfield(EEG, 'event') || isempty(EEG.event)
-        error('EEG.event is missing or empty. Cannot proceed without event data.');
-    end
+    
+    % No default values - all field names must be provided by the user
+    
+    % Rest of validation
+    %if isempty(EEG)
+    %    error('EEG is empty. Cannot proceed.');
+    %end
+    %if ~isfield(EEG, 'event') || isempty(EEG.event)
+        %error('EEG.event is missing or empty. Cannot proceed without event data.');
+    %end
 
     if ~exist(txtFilePath, 'file')
         error('The file "%s" does not exist.', txtFilePath);
@@ -53,6 +61,8 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     fprintf('Number of regions: %d\n', numRegions);
     fprintf('Region names: %s\n', strjoin(regionNames, ', '));
     fprintf('Condition column: %s, Item column: %s\n', conditionColName, itemColName);
+    fprintf('Fixation event type: %s, X position field: %s\n', fixationType, fixationXField);
+    fprintf('Saccade event type: %s, Start X field: %s, End X field: %s\n', saccadeType, saccadeStartXField, saccadeEndXField);
 
     opts = detectImportOptions(txtFilePath, 'Delimiter', '\t');
     opts.VariableNamingRule = 'preserve';
@@ -240,7 +250,19 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
 
     %% Call trial labeling
     fprintf('Performing trial labeling...\n');
-    EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, itemTriggers);
+    EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, itemTriggers, ...
+                             fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
+
+    % Store field names in the EEG structure for use by other functions
+    EEG.eyesort_field_names = struct();
+    EEG.eyesort_field_names.fixationType = fixationType;
+    EEG.eyesort_field_names.fixationXField = fixationXField;
+    EEG.eyesort_field_names.saccadeType = saccadeType;
+    EEG.eyesort_field_names.saccadeStartXField = saccadeStartXField;
+    EEG.eyesort_field_names.saccadeEndXField = saccadeEndXField;
+    
+    % Also store the region names for use by other functions
+    EEG.region_names = regionNames;
 
     % Add a custom field to track processing status instead of using EEG.saved
     EEG.eyesort_processed = true;

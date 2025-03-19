@@ -30,6 +30,11 @@ function [EEG, com] = pop_load_text_ia(EEG)
         [2 1]       % New line for End Code
         [2 1]       % New line for Condition Triggers
         [2 1]       % New line for Item Triggers
+        [2 1]       % New line for Fixation Event Type
+        [2 1]       % New line for Fixation X Position Field
+        [2 1]       % New line for Saccade Event Type
+        [2 1]       % New line for Saccade Start X Position Field
+        [2 1]       % New line for Saccade End X Position Field
         1
         [0.5 0.2 0.2]
     };
@@ -71,8 +76,23 @@ function [EEG, com] = pop_load_text_ia(EEG)
         {'Style','text','String','Condition Triggers (comma-separated):'}, ...
         {'Style','edit','String','S211, S213, S221, S223','tag','edtCondTriggers'}, ...
         ...
-        {'Style','text','String','Item Triggers (comma-separated):'}, ...
+        {'Style','text','String','Item Triggers (Can be a range: S1:S112):'}, ...
         {'Style','edit','String','S1:S112','tag','edtItemTriggers'}, ...
+        ...
+        {'Style','text','String','Name of Fixation Event:'}, ...
+        {'Style','edit','String','R_fixation','tag','edtFixationType'}, ...
+        ...
+        {'Style','text','String','Name of Fixation X Position Field:'}, ...
+        {'Style','edit','String','fix_avgpos_x','tag','edtFixationXField'}, ...
+        ...
+        {'Style','text','String','Name of Saccade Event:'}, ...
+        {'Style','edit','String','R_saccade','tag','edtSaccadeType'}, ...
+        ...
+        {'Style','text','String','Name of Saccade Start X Position Field:'}, ...
+        {'Style','edit','String','sac_startpos_x','tag','edtSaccadeStartXField'}, ...
+        ...
+        {'Style','text','String','Name of Saccade End X Position Field:'}, ...
+        {'Style','edit','String','sac_endpos_x','tag','edtSaccadeEndXField'}, ...
         ...
         {}, ...
         ...
@@ -109,12 +129,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
         % Get current EEG from base workspace
         try
             EEG = evalin('base', 'EEG');
-            %{
-            fprintf('Debug: Retrieved EEG from base workspace\n');
-            fprintf('Debug: Number of events in retrieved EEG: %d\n', length(EEG.event));
-            %}
         catch ME
-            %fprintf('Debug: Error retrieving EEG: %s\n', ME.message);
             errordlg('No EEG dataset loaded in EEGLAB.', 'Error');
             return;
         end
@@ -128,14 +143,6 @@ function [EEG, com] = pop_load_text_ia(EEG)
         if iscell(offsetStr), offsetStr = offsetStr{1}; end
         if iscell(pxPerCharStr), pxPerCharStr = pxPerCharStr{1}; end
         if iscell(numRegionsStr), numRegionsStr = numRegionsStr{1}; end
-
-        %{
-        % Debug raw values
-        fprintf('Debug: Raw input values:\n');
-        fprintf('offsetStr: %s\n', offsetStr);
-        fprintf('pxPerCharStr: %s\n', pxPerCharStr);
-        fprintf('numRegionsStr: %s\n', numRegionsStr);
-        %}
         
         % Convert to numbers and validate
         offset = str2double(offsetStr);
@@ -155,14 +162,6 @@ function [EEG, com] = pop_load_text_ia(EEG)
             errordlg('Number of regions must be positive', 'Invalid Input');
             return;
         end
-
-        %{
-        % Debug the numeric values
-        fprintf('Debug: Converted numeric values:\n');
-        fprintf('offset: %d (class: %s)\n', offset, class(offset));
-        fprintf('pxPerChar: %d (class: %s)\n', pxPerChar, class(pxPerChar));
-        fprintf('numRegions: %d (class: %s)\n', numRegions, class(numRegions));
-        %}
         
         regionNamesStr = get(findobj('tag','edtRegionNames'), 'String');
         conditionColName = get(findobj('tag','edtCondName'), 'String');
@@ -176,10 +175,6 @@ function [EEG, com] = pop_load_text_ia(EEG)
         % Process region names
         if ischar(regionNamesStr)
             regionNames = strtrim(strsplit(regionNamesStr, ','));
-            %{
-            fprintf('Debug: Split into %d region names\n', length(regionNames));
-            fprintf('Debug: Region names: %s\n', strjoin(regionNames, ', '));
-            %}
         else
             errordlg('Region names must be a comma-separated string.', 'Invalid Input');
             return;
@@ -200,11 +195,6 @@ function [EEG, com] = pop_load_text_ia(EEG)
 
         % If only one file is expected, take the first cell
         txtFilePath = txtFileList{1};
-
-        %{
-        fprintf('Debug: About to call compute_text_based_ia\n');
-        fprintf('Debug: Number of events before call: %d\n', length(EEG.event));
-        %}
 
         % Get new parameters from GUI
         startCodeStr = get(findobj('tag','edtStartCode'), 'String');
@@ -280,11 +270,35 @@ function [EEG, com] = pop_load_text_ia(EEG)
             fprintf('Generated item triggers: %s\n', strjoin(itemTriggers, ', '));
         end
 
+        % Get new field name parameters from GUI
+        fixationTypeStr = get(findobj('tag','edtFixationType'), 'String');
+        fixationXFieldStr = get(findobj('tag','edtFixationXField'), 'String');
+        saccadeTypeStr = get(findobj('tag','edtSaccadeType'), 'String');
+        saccadeStartXFieldStr = get(findobj('tag','edtSaccadeStartXField'), 'String');
+        saccadeEndXFieldStr = get(findobj('tag','edtSaccadeEndXField'), 'String');
+        
+        % Convert cell arrays to strings if necessary
+        if iscell(fixationTypeStr), fixationTypeStr = fixationTypeStr{1}; end
+        if iscell(fixationXFieldStr), fixationXFieldStr = fixationXFieldStr{1}; end
+        if iscell(saccadeTypeStr), saccadeTypeStr = saccadeTypeStr{1}; end
+        if iscell(saccadeStartXFieldStr), saccadeStartXFieldStr = saccadeStartXFieldStr{1}; end
+        if iscell(saccadeEndXFieldStr), saccadeEndXFieldStr = saccadeEndXFieldStr{1}; end
+        
+        % Validate that all required field names are provided
+        if isempty(fixationTypeStr) || isempty(fixationXFieldStr) || ...
+           isempty(saccadeTypeStr) || isempty(saccadeStartXFieldStr) || ...
+           isempty(saccadeEndXFieldStr)
+            errordlg('All field names must be specified. Please fill in all fields.', 'Missing Input');
+            return;
+        end
+
         % Call the computational function with all parameters
         try
             processedEEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                                       numRegions, regionNames, conditionColName, ...
-                                      itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers);
+                                      itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
+                                      fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...
+                                      saccadeStartXFieldStr, saccadeEndXFieldStr);
             
             % Store processed data back to base workspace
             assignin('base', 'EEG', processedEEG);
