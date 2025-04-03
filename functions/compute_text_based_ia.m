@@ -1,8 +1,35 @@
-function EEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
+function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, ...
                                               conditionColName, itemColName, startCode, endCode, conditionTriggers, itemTriggers, ...
                                               fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
-    % If EEG is an array (i.e., multiple datasets), process each in a loop.
+    %% COMPUTE_TEXT_BASED_IA - Computes text-based interest areas from a text file and integrates them with EEG data
+    %
+    % This function takes a text file containing reading stimuli organized by regions and maps
+    % those regions onto EEG event data, allowing for region-based analysis of eye movement data.
+    %
+    % INPUTS:
+    %   EEG               - EEGLAB EEG structure or array of structures
+    %   txtFilePath       - Path to tab-delimited text file containing reading stimuli
+    %   offset            - Pixel offset for the start of text (e.g., screen margin in pixels)
+    %   pxPerChar         - Pixels per character (used to calculate region widths)
+    %   numRegions        - Number of regions in each stimulus
+    %   regionNames       - Cell array of region names matching columns in text file
+    %   conditionColName  - Name of condition column in text file
+    %   itemColName       - Name of item column in text file
+    %   startCode         - Event code that marks the start of a trial
+    %   endCode           - Event code that marks the end of a trial
+    %   conditionTriggers - Cell array of condition trigger codes
+    %   itemTriggers      - Cell array of item trigger codes
+    %   fixationType      - Type identifier for fixation events
+    %   fixationXField    - Field name containing fixation X position
+    %   saccadeType       - Type identifier for saccade events
+    %   saccadeStartXField- Field name containing saccade start X position
+    %   saccadeEndXField  - Field name containing saccade end X position
+    %
+    % OUTPUTS:
+    %   EEG               - EEGLAB EEG structure with added interest area information
+    
+    % Handle multiple datasets case - process each one individually
     if numel(EEG) > 1
         for idx = 1:numel(EEG)
             fprintf('\nProcessing dataset %d of %d...\n', idx, numel(EEG));
@@ -32,30 +59,35 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
                                               fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
-    %% Validate inputs and read the interest area text file
+    %% PROCESS_SINGLE_DATASET - Core processing function for interest areas
+    %
+    % This function processes a single EEG dataset, performing the following steps:
+    % 1. Validates input parameters
+    % 2. Reads and parses the text file containing stimuli
+    % 3. Computes region and word boundaries based on character count
+    % 4. Assigns these boundaries to EEG events
+    % 5. Labels trials and fixations with region information
+    % 6. Stores metadata in the EEG structure for later use
+    
+    %% Step 1: Validate inputs and read the interest area text file
     if nargin < 17
         error('compute_text_based_ia_word_level: Not enough input arguments. Field names must be specified.');
     end
     
     % No default values - all field names must be provided by the user
     
-    % Rest of validation
-    %if isempty(EEG)
-    %    error('EEG is empty. Cannot proceed.');
-    %end
-    %if ~isfield(EEG, 'event') || isempty(EEG.event)
-        %error('EEG.event is missing or empty. Cannot proceed without event data.');
-    %end
-
+    % Check if input file exists
     if ~exist(txtFilePath, 'file')
         error('The file "%s" does not exist.', txtFilePath);
     end
 
+    % Check if region names match the specified number of regions
     if length(regionNames) ~= numRegions
         error('Number of regionNames (%d) does not match numRegions (%d).', ...
                length(regionNames), numRegions);
     end
 
+    % Display the input parameters for verification
     fprintf('Input Parameters:\n');
     fprintf('Offset: %d, Pixels per char: %d\n', offset, pxPerChar);
     fprintf('Number of regions: %d\n', numRegions);
@@ -64,20 +96,30 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     fprintf('Fixation event type: %s, X position field: %s\n', fixationType, fixationXField);
     fprintf('Saccade event type: %s, Start X field: %s, End X field: %s\n', saccadeType, saccadeStartXField, saccadeEndXField);
 
+    %% Step 2: Read the text file and prepare the data
+    % Set up import options for the tab-delimited file
     opts = detectImportOptions(txtFilePath, 'Delimiter', '\t');
     opts.VariableNamingRule = 'preserve';
+    
+    % Preserve whitespace in regions - important for word boundary detection
     for i = 1:length(regionNames)
         opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve');
     end
 
+    % Display detected columns for debugging
     fprintf('\nDetected column names in file:\n');
     disp(opts.VariableNames);
+    
+    % Read the data table
     data = readtable(txtFilePath, opts);
     fprintf('\nActual table column names after import:\n');
     disp(data.Properties.VariableNames);
 
+    % Check for the condition and item columns, with flexible matching
     [conditionColName, foundCondCol] = findBestColumnMatch(data.Properties.VariableNames, conditionColName);
     [itemColName, foundItemCol] = findBestColumnMatch(data.Properties.VariableNames, itemColName);
+    
+    % Display helpful error information if columns are not found
     if ~foundCondCol
         fprintf('Could not find condition column "%s". Available columns:\n', conditionColName);
         disp(data.Properties.VariableNames);
@@ -92,6 +134,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     fprintf('Using condition column: %s\n', conditionColName);
     fprintf('Using item column: %s\n', itemColName);
 
+    % Display sample data for verification
     fprintf('\nFirst few rows of condition and item data:\n');
     head_data = head(data);
     try
@@ -102,38 +145,66 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
         rethrow(ME);
     end
 
-    %% Build mapping containers for region boundaries and word boundaries
-    boundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
-    wordBoundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
-    regionWordsMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    %% Step 3: Calculate region and word boundaries for each stimulus
+    % Create containers to store region and word boundary information
+    % These maps use condition_item as keys to retrieve boundaries for specific trials
+    boundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');        % For region boundaries
+    wordBoundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');    % For word boundaries within regions
+    regionWordsMap = containers.Map('KeyType', 'char', 'ValueType', 'any');     % For storing actual words in each region
 
+    % Process each row (stimulus) in the text file
     fprintf('Processing %d rows of data...\n', height(data));
     for iRow = 1:height(data)
         try
+            % Create a unique key based on condition and item numbers
             key = sprintf('%d_%d', data.(conditionColName)(iRow), data.(itemColName)(iRow));
-            currentPosition = offset;
-            regionBoundaries = zeros(numRegions, 2);
+            
+            % Initialize variables for this row
+            currentPosition = offset;  % Start at the specified screen offset
+            regionBoundaries = zeros(numRegions, 2);  % [start, end] for each region
             wordBoundaries = containers.Map('KeyType', 'char', 'ValueType', 'any');
             regionWords = struct();
+            
+            % Process each region in the stimulus
             for r = 1:numRegions
+                % Mark the start of this region
                 regionStart = currentPosition;
+                
+                % Get the text for this region
                 regionText = data.(regionNames{r}){iRow};
                 if iscell(regionText)
                     regionText = char(regionText);
                 end
+                
+                % Calculate region width in pixels based on character count
                 regionWidth = pxPerChar * length(regionText);
                 currentPosition = regionStart + regionWidth;
+                
+                % Store the region boundaries
                 regionBoundaries(r,:) = [regionStart, currentPosition];
+                
+                % Extract words from the region text using regular expressions
+                % This finds all sequences of non-whitespace with any preceding whitespace
                 [wordStarts, wordEnds] = regexp(regionText, '(\s*\S+)', 'start', 'end');
                 wordsInRegion = regexp(regionText, '(\s*\S+)', 'match');
+                
+                % Store the words in the region
                 regionWords.(sprintf('region%d_words', r)) = wordsInRegion;
+                
+                % Calculate and store the boundary of each word in pixels
                 for idx = 1:length(wordStarts)
-                    wordKey = sprintf('%d.%d', r, idx);
+                    wordKey = sprintf('%d.%d', r, idx);  % Format: "region.word_number"
+                    
+                    % Convert character positions to pixel positions
                     wordPixelStart = regionStart + (wordStarts(idx) - 1) * pxPerChar;
                     wordPixelEnd   = regionStart + wordEnds(idx) * pxPerChar;
+                    
+                    % Store the word boundaries
                     wordBoundaries(wordKey) = [wordPixelStart, wordPixelEnd];
                 end
             end
+            
+            % Store all the calculated information for this stimulus
             boundaryMap(key) = regionBoundaries;
             wordBoundaryMap(key) = wordBoundaries;
             regionWordsMap(key) = regionWords;
@@ -143,9 +214,12 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     end
     fprintf('Processed %d rows\n', height(data));
 
-    %% Assign region boundaries to EEG events
+    %% Step 4: Assign region boundaries to EEG events
+    % Initialize region and word boundary fields in all events
     [EEG.event.regionBoundaries] = deal([]);
     [EEG.event.word_boundaries] = deal([]);
+    
+    % Initialize region-specific fields in all events
     for r = 1:numRegions
         [EEG.event.(sprintf('region%d_start', r))] = deal(0);
         [EEG.event.(sprintf('region%d_end', r))] = deal(0);
@@ -153,47 +227,71 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
         [EEG.event.(sprintf('region%d_words', r))] = deal([]);
     end
 
+    % Process EEG events to assign boundaries
     fprintf('Processing EEG events for boundary assignment...\n');
     numAssigned = 0;
+    
+    % Variables to track the current trial context
     currentItem = [];
     currentCond = [];
     trialRunning = false;
     lastValidKey = '';
 
+    % Remove spaces from trigger codes for more flexible matching
     conditionTriggersNoSpace = cellfun(@(x) strrep(x, ' ', ''), conditionTriggers, 'UniformOutput', false);
     itemTriggersNoSpace = cellfun(@(x) strrep(x, ' ', ''), itemTriggers, 'UniformOutput', false);
 
+    % Process each event in the EEG structure
     for iEvt = 1:length(EEG.event)
         eventType = EEG.event(iEvt).type;
         eventTypeNoSpace = strrep(eventType, ' ', '');
+        
+        % Check for trial start/end markers or trigger events
         if strcmp(eventTypeNoSpace, strrep(startCode, ' ', ''))
+            % Trial start - reset tracking variables
             trialRunning = true;
             currentItem = [];
             currentCond = [];
             lastValidKey = '';
         elseif strcmp(eventTypeNoSpace, strrep(endCode, ' ', ''))
+            % Trial end
             trialRunning = false;
         elseif trialRunning && startsWith(eventType, 'S')
+            % This is a stimulus trigger event during an active trial
+            
+            % Check if it's an item trigger
             if any(strcmp(eventTypeNoSpace, itemTriggersNoSpace))
                 currentItem = str2double(regexp(eventTypeNoSpace, '\d+', 'match', 'once'));
+            % Check if it's a condition trigger
             elseif any(strcmp(eventTypeNoSpace, conditionTriggersNoSpace))
                 currentCond = str2double(regexp(eventTypeNoSpace, '\d+', 'match', 'once'));
             end
+            
+            % If we have both condition and item, create a valid lookup key
             if ~isempty(currentItem) && ~isempty(currentCond)
                 lastValidKey = sprintf('%d_%d', currentCond, currentItem);
             end
         end
 
+        % If we're in a valid trial with a known stimulus, assign boundaries to events
         if trialRunning && ~isempty(lastValidKey)
+            % Assign region boundaries if available for this stimulus
             if isKey(boundaryMap, lastValidKey)
                 regionBoundaries = boundaryMap(lastValidKey);
+                
+                % Store the complete region boundaries matrix
                 EEG.event(iEvt).regionBoundaries = regionBoundaries;
+                
+                % Store individual region boundaries for easier access
                 for r = 1:numRegions
                     EEG.event(iEvt).(sprintf('region%d_start', r)) = regionBoundaries(r, 1);
                     EEG.event(iEvt).(sprintf('region%d_end', r)) = regionBoundaries(r, 2);
                     EEG.event(iEvt).(sprintf('region%d_name', r)) = regionNames{r};
                 end
+                
+                % For fixation events, determine which region they fall within
                 if startsWith(EEG.event(iEvt).type, 'R_fixation')
+                    % Get the fixation position, trying different possible field names
                     if isfield(EEG.event(iEvt), 'fix_avgpos_x')
                         fix_pos_x = EEG.event(iEvt).fix_avgpos_x;
                     elseif isfield(EEG.event(iEvt), 'px')
@@ -202,6 +300,8 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                         warning('No x position field found for event %d. Skipping region assignment.', iEvt);
                         continue;
                     end
+                    
+                    % Handle different data types for position
                     if iscell(fix_pos_x)
                         fix_pos_x = fix_pos_x{1};
                     end
@@ -212,6 +312,8 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                         warning('Invalid fix_avgpos_x at event %d. Skipping event.', iEvt);
                         continue;
                     end
+                    
+                    % Determine which region contains this fixation position
                     for r = 1:numRegions
                         region_start = regionBoundaries(r, 1);
                         region_end = regionBoundaries(r, 2);
@@ -224,6 +326,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                 numAssigned = numAssigned + 1;
             end
 
+            % Assign region words if available
             if isKey(regionWordsMap, lastValidKey)
                 regionWords = regionWordsMap(lastValidKey);
                 for r = 1:numRegions
@@ -231,6 +334,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                 end
             end
 
+            % Assign word boundaries if available
             if isKey(wordBoundaryMap, lastValidKey)
                 wordBounds = struct();
                 wordKeys = wordBoundaryMap(lastValidKey).keys;
@@ -246,14 +350,16 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
         end
     end
 
-    fprintf('Finished processing EEG events.\n');
+    fprintf('Finished processing EEG events. Assigned boundaries to %d events.\n', numAssigned);
 
-    %% Call trial labeling
-    fprintf('Performing trial labeling...\n');
-    EEG = new_trial_labelling(EEG, startCode, endCode, conditionTriggers, itemTriggers, ...
+    %% Step 5: Perform detailed trial labeling
+    % This calls trial_labeling function to identify first-pass reading, regressions, etc.
+    fprintf('Performing trial labeling (identifying first-pass reading, regressions, etc.)...\n');
+    EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTriggers, ...
                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
 
-    % Store field names in the EEG structure for use by other functions
+    %% Step 6: Store metadata for use by other functions
+    % Store field names in the EEG structure
     EEG.eyesort_field_names = struct();
     EEG.eyesort_field_names.fixationType = fixationType;
     EEG.eyesort_field_names.fixationXField = fixationXField;
@@ -261,22 +367,38 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     EEG.eyesort_field_names.saccadeStartXField = saccadeStartXField;
     EEG.eyesort_field_names.saccadeEndXField = saccadeEndXField;
     
-    % Also store the region names for use by other functions
+    % Store the region names for use by other functions
     EEG.region_names = regionNames;
 
-    % Add a custom field to track processing status instead of using EEG.saved
+    % Add a custom field to track processing status
     EEG.eyesort_processed = true;
     
     fprintf('\nProcessing complete! You can now filter the dataset using the Filter Datasets option in the EyeSort menu.\n');
 end
 
-%% Helper function: findBestColumnMatch (unchanged core functionality)
+%% Helper function: findBestColumnMatch
 function [bestMatch, found] = findBestColumnMatch(availableColumns, requestedColumn)
+    % FINDBESTCOLUMNMATCH - Finds the best match for a column name in a dataset
+    %
+    % This function tries to match a requested column name with available columns,
+    % handling case differences and special characters like '$'.
+    %
+    % INPUTS:
+    %   availableColumns - Cell array of available column names
+    %   requestedColumn  - String with the requested column name
+    %
+    % OUTPUTS:
+    %   bestMatch - The best matching column name found
+    %   found     - Boolean indicating if a match was found
+    
+    % Check for exact match first
     if ismember(requestedColumn, availableColumns)
         bestMatch = requestedColumn;
         found = true;
         return;
     end
+    
+    % Check for match with/without '$' prefix
     if startsWith(requestedColumn, '$')
         altColumn = requestedColumn(2:end);
     else
@@ -287,6 +409,8 @@ function [bestMatch, found] = findBestColumnMatch(availableColumns, requestedCol
         found = true;
         return;
     end
+    
+    % Check for case-insensitive match
     for i = 1:length(availableColumns)
         if strcmpi(requestedColumn, availableColumns{i})
             bestMatch = availableColumns{i};
@@ -294,6 +418,8 @@ function [bestMatch, found] = findBestColumnMatch(availableColumns, requestedCol
             return;
         end
     end
+    
+    % No match found
     bestMatch = requestedColumn;
     found = false;
 end

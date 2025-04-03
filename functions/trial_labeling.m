@@ -1,12 +1,15 @@
-function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTriggers)
+function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTriggers, ...
+                            fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
     
     % Verify inputs
-    if nargin < 5
-        error('trial_labeling_word_level_sara: Not enough input arguments.');
+    if nargin < 10
+        error('trial_labeling: Not enough input arguments. All field names must be specified.');
     end
-
+    
+    % No default values - all field names are required
+    
     if ~isfield(EEG, 'event') || isempty(EEG.event)
-        error('trial_labeling_word_level_sara: EEG.event is empty or missing.');
+        error('trial_labeling: EEG.event is empty or missing.');
     end
 
     % Print verification of inputs
@@ -14,6 +17,8 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
     fprintf('End code: %s\n', endCode);
     fprintf('Condition triggers: %s\n', strjoin(conditionTriggers, ', '));
     fprintf('Item triggers: %s\n', strjoin(itemTriggers, ', '));
+    fprintf('Fixation event type: %s, X position field: %s\n', fixationType, fixationXField);
+    fprintf('Saccade event type: %s, Start X field: %s, End X field: %s\n', saccadeType, saccadeStartXField, saccadeEndXField);
     
     % Initialize trial tracking variables
     % Trial tracking level
@@ -104,16 +109,7 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
         %%%%%%%%%%%%%% 
         % Check for trial end
         elseif strcmp(eventType, endCode)
-            % At the end of the trial, if we are still in the Ending region and no regression was flagged,
-            % mark all stored fixations as non-regression (Behavior 01).
-            if inEndRegion && ~hasRegressionBeenFound(currentTrial)
-                for j = 1:endRegionFixationCount
-                    fixIdx = endRegionFixations(j);
-                    condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                    EEG.event(fixIdx).type = sprintf('%s0401', condStr);
-                end
-            end
-            % Clear the Ending-region storage.
+            % Reset tracking at the end of the trial
             inEndRegion = false;
             endRegionFixationCount = 0;
             endRegionFixations = [];
@@ -137,7 +133,7 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
             EEG.event(iEvt).item_number = currentItem;
         
         % Process fixation events
-        elseif startsWith(eventType, 'R_fixation')
+        elseif startsWith(eventType, fixationType)
             numFixations = numFixations + 1;
             fprintf('Processing fixation %d, current item: %d, current condition: %d\n', ...
                     numFixations, currentItem, currentCond);
@@ -148,7 +144,7 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                 
                 if ~isempty(currentItem) && ~isempty(currentCond)
                     numProcessed = numProcessed + 1;
-                    currentWord = determine_word_region(EEG.event(iEvt));
+                    currentWord = determine_word_region(EEG.event(iEvt), fixationXField);
                     fprintf('  Determined word: %s\n', currentWord);
                     
                     if ~isempty(currentWord)
@@ -163,12 +159,54 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                             wordFixationCounts(currentWord) = wordFixationCounts(currentWord) + 1;
                         end
                         
+                        % Parse current word into region and word number
+                        [curr_region, curr_word_num] = parse_word_region(currentWord);
+                        
                         % Update first-pass word information
-                        EEG.event(iEvt).is_first_pass_word = ~isKey(visitedWords, currentWord);
+                        % A word is only first-pass if:
+                        % 1. This is the first visit to this word AND
+                        % 2. We haven't visited any words with a higher number in the same region
+                        regionKey = num2str(curr_region);
+
+                        % First, check if any later region has been visited
+                        hasVisitedLaterRegion = false;
+                        regionKeys = visitedRegions.keys();
+                        for k = 1:length(regionKeys)
+                            visitedRegionNum = str2double(regionKeys{k});
+                            if visitedRegionNum > curr_region
+                                hasVisitedLaterRegion = true;
+                                break;
+                            end
+                        end
+
+                        % Only proceed with word-level checks if no later region was visited
+                        isFirstPassPossible = ~hasVisitedLaterRegion;
+                        if isFirstPassPossible
+                            % Then check if this specific word hasn't been visited
+                            isFirstVisitToWord = ~isKey(visitedWords, currentWord);
+                            
+                            % Finally check if any later word in the same region was visited
+                            hasVisitedLaterWord = false;
+                            if isFirstVisitToWord
+                                wordKeys = visitedWords.keys();
+                                for k = 1:length(wordKeys)
+                                    [word_region, word_num] = parse_word_region(wordKeys{k});
+                                    if word_region == curr_region && word_num > curr_word_num
+                                        hasVisitedLaterWord = true;
+                                        break;
+                                    end
+                                end
+                            end
+                            
+                            % Only mark as first pass if all conditions are met
+                            EEG.event(iEvt).is_first_pass_word = isFirstVisitToWord && ~hasVisitedLaterWord;
+                        else
+                            % If a later region was already visited, this can't be first-pass
+                            EEG.event(iEvt).is_first_pass_word = false;
+                        end
+
                         visitedWords(currentWord) = true;
                         
-                        % Parse current word into region
-                        [curr_region, curr_word_num] = parse_word_region(currentWord);
                         % Get region name from the event's region fields (e.g., 'Ending' etc.)
                         regionName = EEG.event(iEvt).(sprintf('region%d_name', curr_region));
                         
@@ -177,7 +215,6 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                         EEG.event(iEvt).previous_region = previousRegion;
                         
                         % Update region fixation counts (using region number as key)
-                        regionKey = num2str(curr_region);
                         if ~isKey(regionFixationCounts, regionKey)
                             regionFixationCounts(regionKey) = 1;
                         else
@@ -185,7 +222,26 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                         end
                         
                         % Update first-pass region information
-                        EEG.event(iEvt).is_first_pass_region = ~isKey(visitedRegions, regionKey);
+                        % Only mark as first pass if:
+                        % 1. This is the first visit to this region AND
+                        % 2. We haven't visited any regions with a higher number
+                        isFirstVisit = ~isKey(visitedRegions, regionKey);
+                        hasVisitedLaterRegion = false;
+                        
+                        % Check if any region with a higher number has been visited
+                        if isFirstVisit
+                            regionKeys = visitedRegions.keys();
+                            for k = 1:length(regionKeys)
+                                visitedRegionNum = str2double(regionKeys{k});
+                                if visitedRegionNum > curr_region
+                                    hasVisitedLaterRegion = true;
+                                    break;
+                                end
+                            end
+                        end
+                        
+                        % Only mark as first pass if both conditions are met
+                        EEG.event(iEvt).is_first_pass_region = isFirstVisit && ~hasVisitedLaterRegion;
                         visitedRegions(regionKey) = true;
                         
                         % Store fixation counts
@@ -208,9 +264,9 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                         EEG.event(iEvt).item_number = currentItem;
                         EEG.event(iEvt).condition_number = currentCond;
 
-                        %% ======= Handle the ENDING region behavior codes =======
+                        %% ======= Track ENDING region regression information =======
                         if strcmp(EEG.event(iEvt).current_region, 'Ending')
-                            % (A) We are in the Ending region: add this fixation to our storage.
+                            % We are in the Ending region: add this fixation to our storage.
                             if ~inEndRegion
                                 inEndRegion = true;
                                 endRegionFixationCount = 0;
@@ -234,38 +290,10 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                                             EEG.event(k).is_regression_trial = true;
                                         end
                                     end
-                                    
-                                    % For word-level regressions, we want to label the fixation immediately 
-                                    % preceding the trigger as Behavior 03. If more than one fixation was stored,
-                                    % label fixations 1 to (N-1) accordingly.
-                                    if endRegionFixationCount > 1
-                                        % Label earlier fixations in the Ending region:
-                                        for j = 1:(endRegionFixationCount - 1)
-                                            fixIdx = endRegionFixations(j);
-                                            condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                                            if j == (endRegionFixationCount - 1)
-                                                % The fixation immediately before the triggering fixation gets Behavior 03.
-                                                EEG.event(fixIdx).type = sprintf('%s0403', condStr);
-                                            else
-                                                % All earlier fixations get Behavior 02.
-                                                EEG.event(fixIdx).type = sprintf('%s0402', condStr);
-                                            end
-                                        end
-                                    else
-                                        % Only one fixation is stored, so assign it directly as Behavior 03.
-                                        fixIdx = endRegionFixations(1);
-                                        condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                                        EEG.event(fixIdx).type = sprintf('%s0403', condStr);
-                                    end
-                                    
-                                    % Clear the Ending-region storage now that the regression has been processed.
-                                    inEndRegion = false;
-                                    endRegionFixationCount = 0;
-                                    endRegionFixations = [];
                                 end
                             end
                         else
-                            % (B) The current fixation is not in Ending.
+                            % The current fixation is not in Ending.
                             % If we were collecting Ending-region fixations and no regression was yet flagged,
                             % then a regression out of the Ending region has occurred.
                             if inEndRegion && ~hasRegressionBeenFound(currentTrial)
@@ -276,23 +304,14 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
                                         EEG.event(k).is_regression_trial = true;
                                     end
                                 end
-                                % Label the stored Ending-region fixations:
-                                for j = 1:endRegionFixationCount
-                                    fixIdx = endRegionFixations(j);
-                                    condStr = sprintf('%02d', mod(EEG.event(fixIdx).condition_number, 100));
-                                    if j == endRegionFixationCount
-                                        EEG.event(fixIdx).type = sprintf('%s0403', condStr);
-                                    else
-                                        EEG.event(fixIdx).type = sprintf('%s0402', condStr);
-                                    end
-                                end
+                                
                                 % Clear the Ending-region storage.
                                 inEndRegion = false;
                                 endRegionFixationCount = 0;
                                 endRegionFixations = [];
                             end
                         end
-                        %% ======= End of ENDING region behavior coding =======
+                        %% ======= End of ENDING region regression tracking =======
 
                         % Now update the previous trackers AFTER handling the Ending region behavior.
                         previousWord = currentWord;
@@ -302,6 +321,8 @@ function EEG = behavior_trial_labeling(EEG, startCode, endCode, conditionTrigger
             end
         end
     end
+    EEG.saved = 'yes';
+
 end
 
 % Parses word region identifiers into region number and word number
@@ -331,18 +352,13 @@ end
 
 
 % Determines which word a fixation falls into based on x-coordinate
-% Handles multiple possible position field names and data formats
 % Returns the word identifier or empty string if no match found
-function currentWord = determine_word_region(event)
+function currentWord = determine_word_region(event, fixationXField)
     currentWord = '';
     
     % Get x position - check all possible field names
-    if isfield(event, 'position_x')
-        x = event.position_x;
-    elseif isfield(event, 'fix_avgpos_x')
-        x = event.fix_avgpos_x;
-    elseif isfield(event, 'px')
-        x = event.px;
+    if isfield(event, fixationXField)
+        x = event.(fixationXField);
     else
         fprintf('Warning: No position data found in event\n');
         return;

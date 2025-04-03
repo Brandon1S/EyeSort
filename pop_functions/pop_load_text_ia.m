@@ -17,39 +17,39 @@ function [EEG, com] = pop_load_text_ia(EEG)
     txtFileList = {};
     
     geomhoriz = { ...
-        [1 0.5]
-        1
-        1
-        [2 1] 
-        [2 1]
-        [2 1]
-        [0.4 1]
-        [2 1]
-        [2 1]
-        [2 1]       % New line for Start Code
-        [2 1]       % New line for End Code
-        [2 1]       % New line for Condition Triggers
-        [2 1]       % New line for Item Triggers
-        [2 1]       % New line for Fixation Event Type
-        [2 1]       % New line for Fixation X Position Field
-        [2 1]       % New line for Saccade Event Type
-        [2 1]       % New line for Saccade Start X Position Field
-        [2 1]       % New line for Saccade End X Position Field
-        1
-        [0.5 0.2 0.2]
+        [1 0.5]       % Text File and browse button
+        1             % Dataset listbox
+        1             % Spacer
+        [2 1]         % Offset edit box
+        [2 1]         % Pixels per char edit box
+        [2 1]         % Number of regions edit box
+        [0.4 1]       % Region names edit box
+        [2 1]         % Condition column name edit box
+        [2 1]         % Item column name edit box
+        [2 1]         % Start Code
+        [2 1]         % End Code
+        [2 1]         % Condition Triggers
+        [2 1]         % Item Triggers
+        [2 1]         % Fixation Event Type
+        [2 1]         % Fixation X Position Field
+        [2 1]         % Saccade Event Type
+        [2 1]         % Saccade Start X Position Field
+        [2 1]         % Saccade End X Position Field
+        1             % Spacer
+        [0.5 0.2 0.2] % Cancel and confirm buttons
     };
 
     % Labels and dropdown menu
     uilist = { ...
         
-        {'Style','text','String','Text File:'}, ...
+        {'Style','text','String','Select the interest area text file containing the trial and interest area information:'}, ...
         {'Style','pushbutton','String','Browse','callback', @browseTxtFile}, ...
         ...
         {'Style', 'listbox', 'tag', 'datasetList', 'string', {}, 'Max', 10, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
         ...
         {}, ...
         ... 
-        {'Style','text','String','Offset (pixels):'}, ...
+        {'Style','text','String','Offset (in pixels):'}, ...
         {'Style','edit','String','281','tag','edtOffset'}, ...
         ...
         {'Style','text','String','Pixels per char:' }, ...
@@ -59,7 +59,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
         {'Style','edit','String','4','tag','edtNumRegions'}, ...
         ...
         {'Style','text','String','Region Names (separate by comma):'}, ...
-        {'Style','edit','String','Beginning,PreTarget,Target_word,Ending','tag','edtRegionNames'}, ...
+        {'Style','edit','String','Beginning, PreTarget, Target_word, Ending','tag','edtRegionNames'}, ...
         ...
         {'Style','text','String','Condition Column Name:'}, ...
         {'Style','edit','String','trigcondition','tag','edtCondName'}, ...
@@ -103,10 +103,9 @@ function [EEG, com] = pop_load_text_ia(EEG)
 
      [~, ~, ~, ~] = supergui('geomhoriz', geomhoriz, 'uilist', uilist, 'title', 'Load Text IA');
 
-     % ---------- Nested Callback Functions -----------------
-    % We'll store the chosen file path in a variable:
+%% ----------------- Nested Callback Functions -----------------
     
-
+    % Store the chosen file path in a variable:
     function browseTxtFile(~,~)
         [fname, fpath] = uigetfile({'*.txt';'*.csv'}, 'Select IA Text File');
         if isequal(fname,0)
@@ -117,7 +116,6 @@ function [EEG, com] = pop_load_text_ia(EEG)
         txtFileList = { filePath };
 
         set(findobj(gcf, 'tag','datasetList'), 'string', txtFileList, 'value',1);
-        % Optionally, show the filename in the GUI somewhere if you like.
     end
 
     function cancel_button(~,~)
@@ -294,7 +292,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
 
         % Call the computational function with all parameters
         try
-            processedEEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
+            processedEEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                                       numRegions, regionNames, conditionColName, ...
                                       itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
                                       fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...

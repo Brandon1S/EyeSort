@@ -1,147 +1,185 @@
 function save_all_filtered_datasets
-% SAVE_ALL_FILTERED_DATASETS - Saves all filtered datasets in ALLEEG 
+% SAVE_ALL_FILTERED_DATASETS - Saves filtered datasets using standard save dialog
 %
-% This function saves all datasets in the EEGLAB ALLEEG structure to their
-% respective filepath/filename locations. It's designed to be run after using
-% the pop_filter_datasets function to filter multiple datasets.
+% This function identifies filtered datasets in the EEGLAB EEG and ALLEEG structures
+% and allows users to save them through the standard EEGLAB save dialog.
 %
 % Usage:
 %   >> save_all_filtered_datasets;
 %
 % Inputs:
-%   None - retrieves ALLEEG from the base workspace
+%   None - retrieves EEG and ALLEEG from the base workspace
 %
 % Outputs:
 %   None - saves datasets to disk
 %
 % See also: pop_filter_datasets, pop_saveset
 
-    % Retrieve ALLEEG from base workspace
+    % Initialize datasets to save
+    datasetsToSave = {};
+    datasetLabels = {};
+    
+    % First check the current EEG dataset
     try
-        ALLEEG = evalin('base', 'ALLEEG');
-        if isempty(ALLEEG)
-            errordlg('No datasets found in EEGLAB workspace.', 'Error');
-            return;
-        end
-    catch
-        errordlg('Could not access ALLEEG. Make sure EEGLAB is running.', 'Error');
-        return;
-    end
-    
-    % Count how many datasets need saving
-    saveCount = 0;
-    filteredDatasetIndices = [];
-    
-    for i = 1:length(ALLEEG)
-        if ~isempty(ALLEEG(i)) && isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event)
-            % Method 1: Check for eyesort_filter_descriptions field (ideal case)
-            if isfield(ALLEEG(i), 'eyesort_filter_descriptions') && ~isempty(ALLEEG(i).eyesort_filter_descriptions)
-                saveCount = saveCount + 1;
-                filteredDatasetIndices(end+1) = i;
-                continue;
-            end
-            
-            % Method 2: Check for 6-digit event types (backup method)
-            hasFilteredEvents = false;
-            for j = 1:length(ALLEEG(i).event)
-                if isfield(ALLEEG(i).event(j), 'type') && ischar(ALLEEG(i).event(j).type) && ...
-                   length(ALLEEG(i).event(j).type) == 6 && all(isstrprop(ALLEEG(i).event(j).type, 'digit'))
-                    hasFilteredEvents = true;
-                    break;
+        EEG = evalin('base', 'EEG');
+        if ~isempty(EEG) && isfield(EEG, 'event') && ~isempty(EEG.event)
+            % Check if this dataset has been filtered
+            if isFilteredDataset(EEG)
+                datasetsToSave{end+1} = EEG;
+                % Create a label for the dataset
+                if isfield(EEG, 'setname') && ~isempty(EEG.setname)
+                    datasetLabels{end+1} = EEG.setname;
+                elseif isfield(EEG, 'filename') && ~isempty(EEG.filename)
+                    datasetLabels{end+1} = EEG.filename;
+                else
+                    datasetLabels{end+1} = 'Current Dataset';
                 end
             end
-            
-            if hasFilteredEvents
-                saveCount = saveCount + 1;
-                filteredDatasetIndices(end+1) = i;
-                fprintf('Found dataset %d with filtered events but no filter descriptions. Will save anyway.\n', i);
-            end
         end
+    catch
+        % If EEG isn't available, continue checking ALLEEG
     end
     
-    if saveCount == 0
+    % Then check ALLEEG for additional filtered datasets
+    try
+        ALLEEG = evalin('base', 'ALLEEG');
+        if ~isempty(ALLEEG)
+            for i = 1:length(ALLEEG)
+                if ~isempty(ALLEEG(i)) && isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event)
+                    % Check if this dataset has been filtered
+                    if isFilteredDataset(ALLEEG(i))
+                        datasetsToSave{end+1} = ALLEEG(i);
+                        % Create a label for the dataset
+                        if isfield(ALLEEG(i), 'setname') && ~isempty(ALLEEG(i).setname)
+                            datasetLabels{end+1} = sprintf('%s (Dataset %d)', ALLEEG(i).setname, i);
+                        elseif isfield(ALLEEG(i), 'filename') && ~isempty(ALLEEG(i).filename)
+                            datasetLabels{end+1} = sprintf('%s (Dataset %d)', ALLEEG(i).filename, i);
+                        else
+                            datasetLabels{end+1} = sprintf('Dataset %d', i);
+                        end
+                    end
+                end
+            end
+        end
+    catch
+        % If ALLEEG isn't available, continue with whatever we found in EEG
+    end
+    
+    % Check if we found any filtered datasets
+    if isempty(datasetsToSave)
         msgbox('No filtered datasets found. Please run filtering first.', 'No Datasets');
         return;
     end
     
-    % Ask user for output directory
-    outputDir = uigetdir(pwd, 'Select directory to save filtered datasets');
-    if outputDir == 0
-        % User cancelled
+    % If we have multiple datasets, let the user select which one to save
+    selectedIndex = 1;
+    if length(datasetsToSave) > 1
+        [selectedIndex, ok] = listdlg('PromptString', 'Select dataset to save:', ...
+                                    'SelectionMode', 'single', ...
+                                    'ListString', datasetLabels, ...
+                                    'Name', 'Save Filtered Dataset');
+        if ~ok || isempty(selectedIndex)
+            % User cancelled
+            return;
+        end
+    end
+    
+    % Get the selected dataset
+    selectedEEG = datasetsToSave{selectedIndex};
+    
+    % Add filter info to setname if it exists
+    if isfield(selectedEEG, 'eyesort_filter_descriptions') && ~isempty(selectedEEG.eyesort_filter_descriptions)
+        % Get the filter code from the last filter description
+        filterDescs = selectedEEG.eyesort_filter_descriptions;
+        filterCode = filterDescs{end}.filter_code;
+        
+        % Add filter code to setname if it doesn't already have it
+        if isfield(selectedEEG, 'setname') && ~isempty(selectedEEG.setname)
+            if ~contains(selectedEEG.setname, ['filtered_' filterCode])
+                selectedEEG.setname = [selectedEEG.setname '_filtered_' filterCode];
+            end
+        end
+    end
+    
+    % Show save dialog for the dataset
+    fprintf('Please save the filtered dataset...\n');
+    try
+        % Get the original filename and filepath if available
+        saveFilename = '';
+        savePath = '';
+        
+        if isfield(selectedEEG, 'filename') && ~isempty(selectedEEG.filename)
+            [filepath, baseName, ~] = fileparts(selectedEEG.filename);
+            if isfield(selectedEEG, 'eyesort_filter_descriptions') && ~isempty(selectedEEG.eyesort_filter_descriptions)
+                filterCode = selectedEEG.eyesort_filter_descriptions{end}.filter_code;
+                saveFilename = [baseName '_filtered_' filterCode '.set'];
+            else
+                saveFilename = [baseName '_filtered.set'];
+            end
+            
+            % Use dataset filepath if available, otherwise current directory
+            if isfield(selectedEEG, 'filepath') && ~isempty(selectedEEG.filepath)
+                savePath = selectedEEG.filepath;
+            elseif ~isempty(filepath)
+                savePath = filepath;
+            end
+        end
+        
+        % If there's no filename yet, use direct UI approach
+        if isempty(saveFilename)
+            [selectedEEG, cancelFlag] = pop_saveset(selectedEEG);
+        else
+            % Use direct file picking approach to show the UI with the 
+            % correct default filename - this works around limitations in pop_saveset
+            [filename, filepath, filterindex] = uiputfile({'*.set','EEGLAB Dataset file (*.set)'},...
+                'Save dataset with .set extension', fullfile(savePath, saveFilename));
+            
+            if filename ~= 0
+                % User chose a file
+                selectedEEG.filename = filename;
+                selectedEEG.filepath = filepath;
+                
+                % Now save the dataset with the chosen filename
+                [selectedEEG, cancelFlag] = pop_saveset(selectedEEG, 'filename', filename, 'filepath', filepath, 'savemode', 'onefile');
+            else
+                % User cancelled
+                cancelFlag = 1;
+            end
+        end
+        
+        if ~cancelFlag
+            fprintf('Dataset saved successfully.\n');
+        else
+            fprintf('Save cancelled by user.\n');
+        end
+    catch ME
+        errordlg(['Error during save: ' ME.message], 'Save Failed');
+        fprintf('Warning: Failed to save dataset: %s\n', ME.message);
+    end
+end
+
+% Helper function to check if a dataset has been filtered
+function result = isFilteredDataset(EEG)
+    result = false;
+    
+    % Method 1: Check for eyesort_filter_descriptions field (ideal case)
+    if isfield(EEG, 'eyesort_filter_descriptions') && ~isempty(EEG.eyesort_filter_descriptions)
+        result = true;
         return;
     end
     
-    % Create progress bar
-    h = waitbar(0, 'Saving filtered datasets...', 'Name', 'Saving Datasets');
+    % Method 2: Check for eyesort_filter_count field
+    if isfield(EEG, 'eyesort_filter_count') && EEG.eyesort_filter_count > 0
+        result = true;
+        return;
+    end
     
-    try
-        % Count of successfully saved datasets
-        saved = 0;
-        
-        % Save each filtered dataset
-        for idx = 1:length(filteredDatasetIndices)
-            i = filteredDatasetIndices(idx);
-            waitbar(saved/saveCount, h, sprintf('Saving dataset %d of %d...', saved+1, saveCount));
-            
-            % Get filename
-            [~, baseName, ~] = fileparts(ALLEEG(i).filename);
-            
-            % Create filename - check if we have filter descriptions
-            if isfield(ALLEEG(i), 'eyesort_filter_descriptions') && ~isempty(ALLEEG(i).eyesort_filter_descriptions)
-                % If filename already has 'filtered' in it, use as is
-                if contains(baseName, 'filtered')
-                    filename = ALLEEG(i).filename;
-                else
-                    % Get the filter code from the last filter description
-                    filterDescs = ALLEEG(i).eyesort_filter_descriptions;
-                    filterCode = filterDescs{end}.filter_code;
-                    filename = sprintf('%s_filtered_%s.set', baseName, filterCode);
-                end
-            else
-                % No filter descriptions, just use generic filtered suffix
-                if contains(baseName, 'filtered')
-                    filename = ALLEEG(i).filename;
-                else
-                    filename = sprintf('%s_filtered.set', baseName);
-                end
-            end
-            
-            % Save the dataset
-            fprintf('Saving dataset %d to %s...\n', i, fullfile(outputDir, filename));
-            try
-                % Use pop_saveset but don't update ALLEEG to avoid structure issues
-                EEG_temp = ALLEEG(i);
-                EEG_temp = pop_saveset(EEG_temp, 'filename', filename, 'filepath', outputDir);
-                
-                % Update the saved status in ALLEEG
-                ALLEEG(i).saved = 'yes';
-                saved = saved + 1;
-            catch ME
-                fprintf('Warning: Failed to save dataset %d: %s\n', i, ME.message);
-            end
-            
-            % Update progress
-            waitbar(saved/saveCount, h);
+    % Method 3: Check for 6-digit event types (backup method)
+    for j = 1:length(EEG.event)
+        if isfield(EEG.event(j), 'type') && ischar(EEG.event(j).type) && ...
+           length(EEG.event(j).type) == 6 && all(isstrprop(EEG.event(j).type, 'digit'))
+            result = true;
+            return;
         end
-        
-        % Update ALLEEG in the base workspace
-        assignin('base', 'ALLEEG', ALLEEG);
-        
-        % Close progress bar
-        close(h);
-        
-        % Show summary
-        if saved > 0
-            msgbox(sprintf('Successfully saved %d of %d filtered datasets to:\n%s', saved, saveCount, outputDir), 'Save Complete');
-        else
-            errordlg('Failed to save any datasets. Check the MATLAB console for errors.', 'Save Failed');
-        end
-        
-    catch ME
-        % Close progress bar if there's an error
-        if exist('h', 'var') && ishandle(h)
-            close(h);
-        end
-        errordlg(['Error during save: ' ME.message], 'Error');
     end
 end 

@@ -1,4 +1,9 @@
 function [EEG, com] = pop_filter_datasets(EEG)
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % FILTER DATASETS SUPERGUI    %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
     % Initialize output
     com = '';
     
@@ -11,6 +16,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
             error('Failed to retrieve EEG dataset from base workspace: %s', ME.message);
         end
     end
+    
+    % Initialize variables that will be used throughout the function
+    regionNames = {};
     
     % Validate input
     if isempty(EEG)
@@ -44,26 +52,25 @@ function [EEG, com] = pop_filter_datasets(EEG)
     % Extract available filtering options from EEG events
     conditionSet = [];
     itemSet = [];
-    regionNames = {};
     
     if isfield(EEG.event, 'condition_number')
         condVals = zeros(1, length(EEG.event));
-        for ii = 1:length(EEG.event)
-            if isfield(EEG.event(ii), 'condition_number') && ~isempty(EEG.event(ii).condition_number)
-                condVals(ii) = EEG.event(ii).condition_number;
+        for kk = 1:length(EEG.event)
+            if isfield(EEG.event(kk), 'condition_number') && ~isempty(EEG.event(kk).condition_number)
+                condVals(kk) = EEG.event(kk).condition_number;
             else
-                condVals(ii) = NaN;
+                condVals(kk) = NaN;
             end
         end
         conditionSet = unique(condVals(~isnan(condVals) & condVals > 0));
     end
     if isfield(EEG.event, 'item_number')
         itemVals = zeros(1, length(EEG.event));
-        for ii = 1:length(EEG.event)
-            if isfield(EEG.event(ii), 'item_number') && ~isempty(EEG.event(ii).item_number)
-                itemVals(ii) = EEG.event(ii).item_number;
+        for kk = 1:length(EEG.event)
+            if isfield(EEG.event(kk), 'item_number') && ~isempty(EEG.event(kk).item_number)
+                itemVals(kk) = EEG.event(kk).item_number;
             else
-                itemVals(ii) = NaN;
+                itemVals(kk) = NaN;
             end
         end
         itemSet = unique(itemVals(~isnan(itemVals) & itemVals > 0));
@@ -82,9 +89,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
         fprintf('No region_names field found, extracting from events and preserving order\n');
         seen = containers.Map('KeyType', 'char', 'ValueType', 'logical');
         if isfield(EEG.event, 'current_region')
-            for ii = 1:length(EEG.event)
-                if isfield(EEG.event(ii), 'current_region') && ~isempty(EEG.event(ii).current_region)
-                    regionName = EEG.event(ii).current_region;
+            for kk = 1:length(EEG.event)
+                if isfield(EEG.event(kk), 'current_region') && ~isempty(EEG.event(kk).current_region)
+                    regionName = EEG.event(kk).current_region;
                     % Only add each region once, preserving order of first appearance
                     if ~isKey(seen, regionName)
                         seen(regionName) = true;
@@ -101,8 +108,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
     
     % Print regions in order for verification
     fprintf('\nRegions in order (as will be displayed in listbox):\n');
-    for i = 1:length(regionNames)
-        fprintf('%d. %s\n', i, regionNames{i});
+    for m = 1:length(regionNames)
+        fprintf('%d. %s\n', m, regionNames{m});
     end
     
     % Create the figure for the GUI
@@ -111,47 +118,179 @@ function [EEG, com] = pop_filter_datasets(EEG)
                   'MenuBar','none',...
                   'ToolBar','none',...
                   'Color',[0.94 0.94 0.94], ...
-                  'Resize', 'off');
+                  'Position', [100 100 680 700]);
     
-    % Define the layout (geomhoriz) and UI controls (uilist)
+    % Define the options to be used for checkboxes
+    passTypeOptions = {'First pass only', 'Not first pass'};
+    fixationTypeOptions = {'First in region', 'Single fixation', 'All but first fixations'};
+    saccadeInDirectionOptions = {'Forward only', 'Backward only'};
+    saccadeOutDirectionOptions = {'Forward only', 'Backward only'};
+    
+    % Create parts of the layout for non-region sections
     geomhoriz = { ...
-        1, ...
-        [2 1], ...
-        [2 1], ...
-        [2 1], ...
-        [2 1], ...
-        [2 1], ...
-        [2 1], ...
-        [2 1], ...
-        1, ...
-        [0.3 0.2 0.2 0.2] ...
+        [1 1 1 1], ...        % Filter Dataset Options title
+        1, ...                % Time-Locked Region title
+        1, ...                % Time-Locked Region description
     };
     
     uilist = { ...
-        {'Style','text','String','Filter Dataset Options', 'FontWeight', 'bold'}, ...
-        {'Style','text','String','Time-Locked Region (Select Primary Region):'}, ...
-        {'Style','listbox','String', regionNames, 'Max', length(regionNames), 'Min', 0, 'tag','lstTimeLocked'}, ...
-        {'Style','text','String','Pass Index:'}, ...
-        {'Style','popupmenu','String',{'Any pass', 'First pass only', 'Not first pass'}, 'tag','popPassIndex'}, ...
-        {'Style','text','String','Previous Region:'}, ...
-        {'Style','popupmenu','String',['Any region', regionNames], 'tag','popPrevRegion'}, ...
-        {'Style','text','String','Next Region:'}, ...
-        {'Style','popupmenu','String',['Any region', regionNames], 'tag','popNextRegion'}, ...
-        {'Style','text','String','Fixation Type:'}, ...
-        {'Style','popupmenu','String',{'Any fixation', 'First in region', 'Single fixation', 'Multiple fixations'}, 'tag','popFixationType'}, ...
-        {'Style','text','String','Saccade In Direction:'}, ...
-        {'Style','popupmenu','String',{'Any direction', 'Forward only', 'Backward only', 'Both'}, 'tag','popSaccadeInDirection'}, ...
-        {'Style','text','String','Saccade Out Direction:'}, ...
-        {'Style','popupmenu','String',{'Any direction', 'Forward only', 'Backward only', 'Both'}, 'tag','popSaccadeOutDirection'}, ...
+        {'Style','text','String','Filter Dataset Options:', 'FontWeight', 'bold'}, ...
         {}, ...
         {}, ...
-        {'Style', 'pushbutton', 'String', 'Cancel', 'callback', @(~,~) cancel_button}, ...
-        {'Style', 'pushbutton', 'String', 'Apply Filter', 'callback', @(~,~) apply_filter}, ...
-        {'Style', 'pushbutton', 'String', 'Finish', 'callback', @(~,~) finish_filtering} ...
+        {}, ...
+        ...
+        {'Style','text','String','Time-Locked Region Selection:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','text','String','Indicates the main region of interest for the rest of the filters to be applied.'}, ...
     };
     
+    % Add dynamically generated checkboxes for regions
+    numRegions = length(regionNames);
+    regionCheckboxTags = cell(1, numRegions);
+    
+    % Each row will have 5 regions max (or fewer for the last row)
+    regionsPerRow = 5;
+    numRows = ceil(numRegions / regionsPerRow);
+    
+    for row = 1:numRows
+        % Add geometry for this row
+        columnsInRow = min(regionsPerRow, numRegions - (row-1)*regionsPerRow);
+        rowGeom = zeros(1, columnsInRow);
+        for col = 1:columnsInRow
+            rowGeom(col) = 1/columnsInRow;
+        end
+        geomhoriz{end+1} = rowGeom;
+        
+        % Add checkboxes for this row
+        for col = 1:columnsInRow
+            regionIdx = (row-1)*regionsPerRow + col;
+            tag = sprintf('chkRegion%d', regionIdx);
+            regionCheckboxTags{regionIdx} = tag;
+            uilist{end+1} = {'Style','checkbox','String', regionNames{regionIdx}, 'tag', tag};
+        end
+    end
+    
+    % Create arrays for previous and next region checkboxes
+    prevRegionCheckboxTags = cell(1, numRegions);
+    nextRegionCheckboxTags = cell(1, numRegions);
+    
+    % Continue with the rest of the UI
+    additionalGeomHoriz = { ...
+        1, ...                 % Pass Type Selection title
+        1, ...                % Pass Type Selection Description
+        [0.5 0.5], ...         % Pass type checkboxes
+        1, ...                 % Previous Region Navigation title
+        1  ...                 % Previous Region Navigation Description
+    };
+    
+    additionalUIList = { ...
+        {'Style','text','String','Pass Type Selection:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','text','String','Indicates whether the first-pass fixation on the time-locked region needs to be filtered or all fixations but the first-pass fixation.'}, ...
+        ...
+        {'Style','checkbox','String', passTypeOptions{1}, 'tag','chkPass1'}, ...
+        {'Style','checkbox','String', passTypeOptions{2}, 'tag','chkPass2'}, ...
+        ...
+        {'Style','text','String','Previous Region Selection:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','text','String','Indicates the previous region of interest for where the last fixation was located.'}, ...
+    };
+    
+    % Add Previous Region checkboxes with similar logic
+    for row = 1:numRows
+        % Add geometry for this row
+        columnsInRow = min(regionsPerRow, numRegions - (row-1)*regionsPerRow);
+        rowGeom = zeros(1, columnsInRow);
+        for col = 1:columnsInRow
+            rowGeom(col) = 1/columnsInRow;
+        end
+        additionalGeomHoriz{end+1} = rowGeom;
+        
+        % Add checkboxes for this row
+        for col = 1:columnsInRow
+            regionIdx = (row-1)*regionsPerRow + col;
+            tag = sprintf('chkPrevRegion%d', regionIdx);
+            prevRegionCheckboxTags{regionIdx} = tag;
+            additionalUIList{end+1} = {'Style','checkbox','String', regionNames{regionIdx}, 'tag', tag};
+        end
+    end
+    
+    % Add Next Region title and description after Previous Region checkboxes
+    additionalGeomHoriz{end+1} = 1;  % Next Region title
+    additionalGeomHoriz{end+1} = 1;  % Next Region description
+    additionalUIList{end+1} = {'Style','text','String','Next Region Selection:', 'FontWeight', 'bold'};
+    additionalUIList{end+1} = {'Style','text','String','Indicates the next region of interest for where the next fixation was located.'};
+    
+    % Add Next Region checkboxes with similar logic
+    for row = 1:numRows
+        % Add geometry for this row
+        columnsInRow = min(regionsPerRow, numRegions - (row-1)*regionsPerRow);
+        rowGeom = zeros(1, columnsInRow);
+        for col = 1:columnsInRow
+            rowGeom(col) = 1/columnsInRow;
+        end
+        additionalGeomHoriz{end+1} = rowGeom;
+        
+        % Add checkboxes for this row
+        for col = 1:columnsInRow
+            regionIdx = (row-1)*regionsPerRow + col;
+            tag = sprintf('chkNextRegion%d', regionIdx);
+            nextRegionCheckboxTags{regionIdx} = tag;
+            additionalUIList{end+1} = {'Style','checkbox','String', regionNames{regionIdx}, 'tag', tag};
+        end
+    end
+    
+    % Add the rest of the UI controls
+    additionalGeomHoriz = [additionalGeomHoriz, { ...
+        1, ...                       % Fixation Type Selection title
+        1, ...                       % Fixation Type Description
+        [0.33 0.33 0.34], ...        % Fixation type checkboxes
+        1, ...                       % Saccade Direction Selection title
+        1, ...                       % Saccade Direction Description
+        [0.33 0.33 0.33], ...   % Saccade In label and checkboxes
+        [0.33 0.33 0.33], ...   % Saccade Out label and checkboxes
+        1, ...                       % Spacer
+        [2 1 1.5 1.5] ...            % Buttons
+    }];
+    
+    additionalUIList = [additionalUIList, { ...
+        {'Style','text','String','Fixation Type Selection:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','text','String','Indicates the exact type of fixation event to be filtered.'}, ...
+        ...
+        {'Style','checkbox','String', fixationTypeOptions{1}, 'tag','chkFixType1'}, ...
+        {'Style','checkbox','String', fixationTypeOptions{2}, 'tag','chkFixType2'}, ...
+        {'Style','checkbox','String', fixationTypeOptions{3}, 'tag','chkFixType3'}, ...
+        ...
+        {'Style','text','String','Saccade Direction Selection:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','text','String','Indicates the direction of the saccade event to be filtered.'}, ...
+        ...
+        {'Style','text','String','Saccade In:'}, ...
+        {'Style','checkbox','String', saccadeInDirectionOptions{1}, 'tag','chkSaccadeIn1'}, ...
+        {'Style','checkbox','String', saccadeInDirectionOptions{2}, 'tag','chkSaccadeIn2'}, ...
+        ...
+        {'Style','text','String','Saccade Out:'}, ...
+        {'Style','checkbox','String', saccadeOutDirectionOptions{1}, 'tag','chkSaccadeOut1'}, ...
+        {'Style','checkbox','String', saccadeOutDirectionOptions{2}, 'tag','chkSaccadeOut2'}, ...
+        ...
+        {}, ...
+        ...
+        {}, ...
+        {'Style', 'pushbutton', 'String', 'Cancel', 'callback', @(~,~) cancel_button}, ...
+        {'Style', 'pushbutton', 'String', 'Apply Additional Filter', 'callback', @(~,~) apply_filter}, ...
+        {'Style', 'pushbutton', 'String', 'Finish Filtering Process', 'callback', @(~,~) finish_filtering} ...
+    }];
+    
+    % Combine all parts
+    geomhoriz = [geomhoriz, additionalGeomHoriz];
+    uilist = [uilist, additionalUIList];
+    
     % Create the GUI using supergui
-    [~, ~, ~, ~] = supergui('fig', hFig, 'geomhoriz', geomhoriz, 'uilist', uilist, 'title', 'Filter Dataset');
+    [~, ~, ~, ~] = supergui('fig', hFig, 'geomhoriz', geomhoriz, 'uilist', uilist);
+    
+    % Center the window
+    movegui(hFig, 'center');
     
     % *** Modification: Pause execution until user interaction is complete ***
     uiwait(hFig);  % This will pause the function until uiresume is called
@@ -161,13 +300,23 @@ function [EEG, com] = pop_filter_datasets(EEG)
         % Set the command to empty to indicate cancellation
         com = '';
         uiresume(gcf);  % Resume execution (release uiwait)
+        fprintf('User selected to cancel the filtering process.\n');
         close(gcf);
     end
 
     % Callback for the Finish button
     function finish_filtering(~,~)
         % Apply the current filter if any and then signal completion
-        if isempty(get(findobj('tag','lstTimeLocked'), 'Value'))
+        % Check if any region is selected
+        regionSelected = false;
+        for ii = 1:length(regionCheckboxTags)
+            if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
+                regionSelected = true;
+                break;
+            end
+        end
+        
+        if ~regionSelected
             % If no regions selected, just finish without applying a filter
             com = sprintf('EEG = pop_filter_datasets(EEG); %% Filtering completed');
             uiresume(gcf);  % Resume execution (release uiwait)
@@ -186,18 +335,62 @@ function [EEG, com] = pop_filter_datasets(EEG)
 
     % Shared function to apply filters
     function apply_filter_internal(shouldClose)
-        % Retrieve filter selections from the GUI
-        selectedTimeLockedRegions = get(findobj('tag','lstTimeLocked'), 'Value');
-        if iscell(selectedTimeLockedRegions)
-            selectedTimeLockedRegions = cell2mat(selectedTimeLockedRegions);
-        end
+        % Retrieve filter selections from the GUI - now using checkboxes for regions
+        % Preallocate arrays with max possible size
+        selectedTimeLockedRegions = zeros(1, length(regionCheckboxTags));
+        timeLockedRegionValues = cell(1, length(regionCheckboxTags));
+        numSelected = 0;
         
-        passIndexOption = get(findobj('tag','popPassIndex'), 'Value');
-        prevRegionOption = get(findobj('tag','popPrevRegion'), 'Value');
-        nextRegionOption = get(findobj('tag','popNextRegion'), 'Value');
-        fixationTypeOption = get(findobj('tag','popFixationType'), 'Value');
-        saccadeInDirectionOption = get(findobj('tag','popSaccadeInDirection'), 'Value');
-        saccadeOutDirectionOption = get(findobj('tag','popSaccadeOutDirection'), 'Value');
+        % Get selected regions from checkboxes 
+        for j = 1:length(regionCheckboxTags)
+            if get(findobj('tag', regionCheckboxTags{j}), 'Value') == 1
+                numSelected = numSelected + 1;
+                selectedTimeLockedRegions(numSelected) = j;
+                timeLockedRegionValues{numSelected} = regionNames{j};
+            end
+        end
+        % Trim to actual size
+        selectedTimeLockedRegions = selectedTimeLockedRegions(1:numSelected);
+        timeLockedRegionValues = timeLockedRegionValues(1:numSelected);
+        
+        % Get checkbox states for pass type options
+        passFirstPass = get(findobj('tag','chkPass1'), 'Value');
+        passNotFirstPass = get(findobj('tag','chkPass2'), 'Value');
+        
+        % Get selected previous regions from checkboxes
+        selectedPrevRegions = cell(1, length(prevRegionCheckboxTags));
+        numPrevSelected = 0;
+        for j = 1:length(prevRegionCheckboxTags)
+            if get(findobj('tag', prevRegionCheckboxTags{j}), 'Value') == 1
+                numPrevSelected = numPrevSelected + 1;
+                selectedPrevRegions{numPrevSelected} = regionNames{j};
+            end
+        end
+        selectedPrevRegions = selectedPrevRegions(1:numPrevSelected);
+        
+        % Get selected next regions from checkboxes
+        selectedNextRegions = cell(1, length(nextRegionCheckboxTags));
+        numNextSelected = 0;
+        for j = 1:length(nextRegionCheckboxTags)
+            if get(findobj('tag', nextRegionCheckboxTags{j}), 'Value') == 1
+                numNextSelected = numNextSelected + 1;
+                selectedNextRegions{numNextSelected} = regionNames{j};
+            end
+        end
+        selectedNextRegions = selectedNextRegions(1:numNextSelected);
+        
+        % Get checkbox states for fixation type options
+        fixFirstInRegion = get(findobj('tag','chkFixType1'), 'Value');
+        fixSingleFixation = get(findobj('tag','chkFixType2'), 'Value');
+        fixMultipleFixations = get(findobj('tag','chkFixType3'), 'Value');
+        
+        % Get checkbox states for saccade in direction options
+        saccadeInForward = get(findobj('tag','chkSaccadeIn1'), 'Value');
+        saccadeInBackward = get(findobj('tag','chkSaccadeIn2'), 'Value');
+        
+        % Get checkbox states for saccade out direction options
+        saccadeOutForward = get(findobj('tag','chkSaccadeOut1'), 'Value');
+        saccadeOutBackward = get(findobj('tag','chkSaccadeOut2'), 'Value');
         
         % Check for valid region data
         if strcmp(regionNames{1}, 'No regions found')
@@ -205,21 +398,92 @@ function [EEG, com] = pop_filter_datasets(EEG)
             return;
         end
         
-        % Convert selections to actual values
-        timeLockedRegionValues = cell(1, length(selectedTimeLockedRegions));
-        for j = 1:length(selectedTimeLockedRegions)
-            timeLockedRegionValues{j} = regionNames{selectedTimeLockedRegions(j)};
+        % Check if any region is selected
+        if isempty(timeLockedRegionValues)
+            errordlg('Please select at least one time-locked region.', 'No Region Selected');
+            return;
         end
         
+        %{
         % Get previous/next region values (if any)
         prevRegion = '';
-        if prevRegionOption > 1
-            prevRegion = regionNames{prevRegionOption-1};
+        if length(selectedPrevRegions) > 0
+            prevRegion = selectedPrevRegions{1};
         end
         
         nextRegion = '';
-        if nextRegionOption > 1
-            nextRegion = regionNames{nextRegionOption-1};
+        if length(selectedNextRegions) > 0
+            nextRegion = selectedNextRegions{1};
+        end
+        %}
+        
+        % Create arrays to hold selected options - preallocate maximum size
+        passOptions = zeros(1, 2);  % Max 2 options (First pass and Not first pass)
+        passCount = 0;
+        if passFirstPass
+            passCount = passCount + 1;
+            passOptions(passCount) = 2; % First pass only
+        end
+        if passNotFirstPass
+            passCount = passCount + 1;
+            passOptions(passCount) = 3; % Not first pass
+        end
+        if passCount == 0
+            passOptions = 1; % Any pass (default if none selected)
+        else
+            passOptions = passOptions(1:passCount);
+        end
+        
+        fixationOptions = zeros(1, 3);  % Max 3 options
+        fixCount = 0;
+        if fixFirstInRegion
+            fixCount = fixCount + 1;
+            fixationOptions(fixCount) = 2; % First in region
+        end
+        if fixSingleFixation
+            fixCount = fixCount + 1;
+            fixationOptions(fixCount) = 3; % Single fixation
+        end
+        if fixMultipleFixations
+            fixCount = fixCount + 1;
+            fixationOptions(fixCount) = 4; % Multiple fixations
+        end
+        if fixCount == 0
+            fixationOptions = 1; % Any fixation (default if none selected)
+        else
+            fixationOptions = fixationOptions(1:fixCount);
+        end
+        
+        saccadeInOptions = zeros(1, 2);  % Max 2 options
+        saccInCount = 0;
+        if saccadeInForward
+            saccInCount = saccInCount + 1;
+            saccadeInOptions(saccInCount) = 2; % Forward only
+        end
+        if saccadeInBackward
+            saccInCount = saccInCount + 1;
+            saccadeInOptions(saccInCount) = 3; % Backward only
+        end
+        if saccInCount == 0
+            saccadeInOptions = 1; % Any direction (default if none selected)
+        else
+            saccadeInOptions = saccadeInOptions(1:saccInCount);
+        end
+        
+        saccadeOutOptions = zeros(1, 2);  % Max 2 options
+        saccOutCount = 0;
+        if saccadeOutForward
+            saccOutCount = saccOutCount + 1;
+            saccadeOutOptions(saccOutCount) = 2; % Forward only
+        end
+        if saccadeOutBackward
+            saccOutCount = saccOutCount + 1;
+            saccadeOutOptions(saccOutCount) = 3; % Backward only
+        end
+        if saccOutCount == 0
+            saccadeOutOptions = 1; % Any direction (default if none selected)
+        else
+            saccadeOutOptions = saccadeOutOptions(1:saccOutCount);
         end
         
         % Increment filter count and update EEG
@@ -228,8 +492,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         
         try
             filteredEEG = filter_dataset(EEG, conditionSet, itemSet, timeLockedRegionValues, ...
-                                         passIndexOption, prevRegion, nextRegion, ...
-                                         fixationTypeOption, saccadeInDirectionOption, saccadeOutDirectionOption, currentFilterCount, ...
+                                         passOptions, selectedPrevRegions, selectedNextRegions, ...
+                                         fixationOptions, saccadeInOptions, saccadeOutOptions, currentFilterCount, ...
                                          fixationType, fixationXField, saccadeType, ...
                                          saccadeStartXField, saccadeEndXField);
             filteredEEG.eyesort_filter_count = currentFilterCount;
@@ -241,16 +505,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
             filterDesc.filter_number = currentFilterCount;
             filterDesc.filter_code = sprintf('%02d', currentFilterCount);
             filterDesc.regions = timeLockedRegionValues;
-            filterDesc.pass_type = get(findobj('tag','popPassIndex'), 'String');
-            filterDesc.pass_value = passIndexOption;
-            filterDesc.prev_region = prevRegion;
-            filterDesc.next_region = nextRegion;
-            filterDesc.fixation_type = get(findobj('tag','popFixationType'), 'String');
-            filterDesc.fixation_value = fixationTypeOption;
-            filterDesc.saccade_in_dir = get(findobj('tag','popSaccadeInDirection'), 'String');
-            filterDesc.saccade_in_value = saccadeInDirectionOption;
-            filterDesc.saccade_out_dir = get(findobj('tag','popSaccadeOutDirection'), 'String');
-            filterDesc.saccade_out_value = saccadeOutDirectionOption;
+            filterDesc.pass_options = passOptions;
+            filterDesc.prev_regions = selectedPrevRegions;
+            filterDesc.next_regions = selectedNextRegions;
+            filterDesc.fixation_options = fixationOptions;
+            filterDesc.saccade_in_options = saccadeInOptions;
+            filterDesc.saccade_out_options = saccadeOutOptions;
             filterDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
             
             filteredEEG.eyesort_filter_descriptions{end+1} = filterDesc;
@@ -266,15 +526,34 @@ function [EEG, com] = pop_filter_datasets(EEG)
             com = sprintf('EEG = pop_filter_datasets(EEG); %% Applied filter #%d', currentFilterCount);
             
             % Display a message box with filter results
-            msgStr = sprintf(['Filter #%d applied successfully!\n\n',...
-                              'Identified %d events matching your filter criteria.\n\n',...
-                              'These events have been labeled with a 6-digit code: CCRRFF\n',...
-                              'Where: CC = condition code, RR = region code, FF = filter code (%02d)\n\n',...
-                              '%s'],...
-                              currentFilterCount, filteredEEG.eyesort_last_filter_matched_count, currentFilterCount, ...
-                              iif(shouldClose, 'Filtering complete!', 'You can now apply another filter or click Finish when done.'));
+            if filteredEEG.eyesort_last_filter_matched_count > 0
+                msgStr = sprintf(['Filter #%d applied successfully!\n\n',...
+                                'Identified %d events matching your filter criteria.\n\n',...
+                                'These events have been labeled with a 6-digit code: CCRRFF\n',...
+                                'Where: CC = condition code, RR = region code, FF = filter code (%02d)\n\n',...
+                                '%s'],...
+                                currentFilterCount, filteredEEG.eyesort_last_filter_matched_count, currentFilterCount, ...
+                                iif(shouldClose, 'Filtering complete!', 'You can now apply another filter or click Finish when done.'));
+                
+                hMsg = msgbox(msgStr, sprintf('Filter #%d Applied', currentFilterCount), 'help');
+            else
+                % Special message for when no events were found
+                msgStr = sprintf(['WARNING: Filter #%d applied, but NO EVENTS matched your criteria!\n\n',...
+                                'This could be because:\n',...
+                                '1. The filter criteria are too restrictive\n',...
+                                '2. There is a mismatch between expected event fields and actual data\n',...
+                                '3. The events that would match already have filter codes from a previous filter\n\n',...
+                                'Consider:\n',...
+                                '- Relaxing your criteria\n',...
+                                '- Checking for conflicts with existing filters\n',...
+                                '- Verifying your dataset contains the expected fields\n\n',...
+                                '%s'],...
+                                currentFilterCount, ...
+                                iif(shouldClose, 'Filtering complete!', 'You can modify your filter settings and try again.'));
+                
+                hMsg = msgbox(msgStr, sprintf('No Events Found - Filter #%d', currentFilterCount), 'warn');
+            end
             
-            hMsg = msgbox(msgStr, sprintf('Filter #%d Applied', currentFilterCount), 'help');
             hBtn = findobj(hMsg, 'Type', 'UIControl', 'Style', 'pushbutton');
             if ~isempty(hBtn)
                 set(hBtn, 'FontWeight', 'bold', 'FontSize', 10);
@@ -289,7 +568,19 @@ function [EEG, com] = pop_filter_datasets(EEG)
             else
                 % Reset the time-locked region selection for the next filter
                 % but keep other settings
-                set(findobj('tag','lstTimeLocked'), 'Value', []);
+                for i = 1:length(regionCheckboxTags)
+                    set(findobj('tag', regionCheckboxTags{i}), 'Value', 0);
+                end
+                
+                % Reset the previous region checkboxes
+                for i = 1:length(prevRegionCheckboxTags)
+                    set(findobj('tag', prevRegionCheckboxTags{i}), 'Value', 0);
+                end
+                
+                % Reset the next region checkboxes
+                for i = 1:length(nextRegionCheckboxTags)
+                    set(findobj('tag', nextRegionCheckboxTags{i}), 'Value', 0);
+                end
             end
         catch ME
             errordlg(['Error applying filter: ' ME.message], 'Error');
@@ -307,9 +598,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
 end
 
 function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions, ...
-                                     passIndexOption, prevRegion, nextRegion, ...
-                                     fixationTypeOption, saccadeInDirectionOption, ...
-                                     saccadeOutDirectionOption, filterCount, ...
+                                     passOptions, prevRegions, nextRegions, ...
+                                     fixationOptions, saccadeInOptions, ...
+                                     saccadeOutOptions, filterCount, ...
                                      fixationType, fixationXField, saccadeType, ...
                                      saccadeStartXField, saccadeEndXField)
     % Create a copy of the EEG structure
@@ -329,39 +620,62 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
     
     % Create region code mapping - map region names to 2-digit codes
     regionCodeMap = containers.Map('KeyType', 'char', 'ValueType', 'char');
-    uniqueRegions = unique({EEG.event.current_region});
     
-    % Define standard region order with fixed numbering
-    standardRegions = {'Beginning', 'PreTarget', 'Target_word', 'Ending'};
-    for ii = 1:length(standardRegions)
-        regionCodeMap(standardRegions{ii}) = sprintf('%02d', ii);
+    % Get the unique region names from the EEG events
+    if isfield(EEG, 'region_names') && ~isempty(EEG.region_names)
+        % Use the regions stored in the EEG structure
+        regionList = EEG.region_names;
+        if ischar(regionList)
+            regionList = {regionList}; % Convert to cell array if it's a string
+        end
+    else
+        % Extract from events
+        regionList = unique({EEG.event.current_region});
     end
     
-    % Add any additional regions that weren't in the standard list
-    nextCode = length(standardRegions) + 1;
-    for ii = 1:length(uniqueRegions)
-        regionName = uniqueRegions{ii};
-        if ~isempty(regionName) && ~isKey(regionCodeMap, regionName)
-            regionCodeMap(regionName) = sprintf('%02d', nextCode);
-            nextCode = nextCode + 1;
+    % Map each region to a 2-digit code
+    for kk = 1:length(regionList)
+        if ~isempty(regionList{kk}) && ischar(regionList{kk})
+            regionCodeMap(regionList{kk}) = sprintf('%02d', kk);
         end
     end
     
     % Print the region code mapping for verification
     fprintf('\n============ REGION CODE MAPPING ============\n');
-    allRegions = keys(regionCodeMap);
-    for ii = 1:length(allRegions)
-        fprintf('  Region "%s" = Code %s\n', allRegions{ii}, regionCodeMap(allRegions{ii}));
+    if ~isempty(regionCodeMap) && regionCodeMap.Count > 0
+        % Print in the original order the regions were added, not in the order keys() returns them
+        for kk = 1:length(regionList)
+            if ~isempty(regionList{kk}) && ischar(regionList{kk}) && isKey(regionCodeMap, regionList{kk})
+                fprintf('  Region "%s" = Code %s\n', regionList{kk}, regionCodeMap(regionList{kk}));
+            end
+        end
+    else
+        fprintf('  No regions found to map\n');
     end
     fprintf('=============================================\n\n');
     
+    % Track events with conflicting codes
+    conflictingEvents = {};
+    
     % Apply filtering criteria
-    for i = 1:length(EEG.event)
-        evt = EEG.event(i);
+    for mm = 1:length(EEG.event)
+        evt = EEG.event(mm);
         
-        % Only process fixation events for potential code updates
-        % Non-fixation events remain unchanged
-        if ~startsWith(evt.type, fixationType)
+        % Check if this is a fixation event or a previously coded fixation event
+        % (for previously coded fixation events, the type will be a 6-digit code)
+        isFixation = false;
+        
+        % Check if this event is a fixation or was a fixation (now has a 6-digit code)
+        if ischar(evt.type) && startsWith(evt.type, fixationType)
+            isFixation = true;
+        elseif isfield(evt, 'original_type') && ischar(evt.original_type) && startsWith(evt.original_type, fixationType)
+            isFixation = true;
+        elseif ischar(evt.type) && length(evt.type) == 6 && isfield(evt, 'eyesort_full_code')
+            % This is likely a previously coded fixation event
+            isFixation = true;
+        end
+        
+        if ~isFixation
             continue;
         end
         
@@ -395,31 +709,65 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             continue;
         end
         
-        % Pass index filtering
-        passesPassIndex = true;
-        if passIndexOption > 1 && isfield(evt, 'is_first_pass_region')
-            if passIndexOption == 2 % First pass only
+        % Pass index filtering - modified to handle multiple selection options
+        passesPassIndex = false;
+        
+        % Handle the case where passOptions is a single value (backward compatibility)
+        if isscalar(passOptions)
+            if passOptions == 1 % Any pass
+                passesPassIndex = true;
+            elseif passOptions == 2 && isfield(evt, 'is_first_pass_region') % First pass only
                 passesPassIndex = evt.is_first_pass_region;
-            elseif passIndexOption == 3 % Not first pass
+            elseif passOptions == 3 && isfield(evt, 'is_first_pass_region') % Not first pass
                 passesPassIndex = ~evt.is_first_pass_region;
+            else
+                passesPassIndex = true; % Default to true if no valid option or field
+            end
+        else
+            % Handle the case where passOptions is an array of multiple options
+            if isempty(passOptions) || any(passOptions == 1) % Any pass included
+                passesPassIndex = true;
+            else
+                % Check each option
+                for opt = passOptions
+                    if opt == 2 && isfield(evt, 'is_first_pass_region') && evt.is_first_pass_region
+                        passesPassIndex = true;
+                        break;
+                    elseif opt == 3 && isfield(evt, 'is_first_pass_region') && ~evt.is_first_pass_region
+                        passesPassIndex = true;
+                        break;
+                    end
+                end
             end
         end
         
         % Previous region filtering
         passesPrevRegion = true;
-        if ~isempty(prevRegion) && isfield(evt, 'previous_region')
-            passesPrevRegion = strcmp(evt.previous_region, prevRegion);
+        if ~isempty(prevRegions)
+            passesPrevRegion = any(strcmp(evt.previous_region, prevRegions));
         end
         
         % Next region filtering (requires looking ahead)
         passesNextRegion = true;
-        if ~isempty(nextRegion)
+        if ~isempty(nextRegions)
             % Look ahead to find the next fixation event, not just the next event
             nextFixationFound = false;
-            for jj = i+1:length(EEG.event)
-                if startsWith(EEG.event(jj).type, fixationType) && isfield(EEG.event(jj), 'current_region')
+            for jj = mm+1:length(EEG.event)
+                % Need to check both original fixation types and coded events
+                nextEvt = EEG.event(jj);
+                isNextFixation = false;
+                
+                if ischar(nextEvt.type) && startsWith(nextEvt.type, fixationType)
+                    isNextFixation = true;
+                elseif isfield(nextEvt, 'original_type') && ischar(nextEvt.original_type) && startsWith(nextEvt.original_type, fixationType)
+                    isNextFixation = true;
+                elseif ischar(nextEvt.type) && length(nextEvt.type) == 6 && isfield(nextEvt, 'eyesort_full_code')
+                    isNextFixation = true;
+                end
+                
+                if isNextFixation && isfield(nextEvt, 'current_region')
                     nextFixationFound = true;
-                    passesNextRegion = strcmp(EEG.event(jj).current_region, nextRegion);
+                    passesNextRegion = any(strcmp(nextEvt.current_region, nextRegions));
                     break; % Stop after finding the next fixation
                 end
             end
@@ -429,110 +777,189 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             end
         end
         
-        % Fixation type filtering
-        passesFixationType = true;
-        if fixationTypeOption > 1 && isfield(evt, 'total_fixations_in_region')
-            if fixationTypeOption == 2 % First in region
+        % Fixation type filtering - modified to handle multiple selection options
+        passesFixationType = false;
+        
+        % Handle the case where fixationOptions is a single value (backward compatibility)
+        if isscalar(fixationOptions)
+            if fixationOptions == 1 % Any fixation
+                passesFixationType = true;
+            elseif fixationOptions == 2 && isfield(evt, 'total_fixations_in_region') % First in region
                 passesFixationType = evt.total_fixations_in_region == 1;
-            elseif fixationTypeOption == 3 % Single fixation
+            elseif fixationOptions == 3 && isfield(evt, 'total_fixations_in_region') % Single fixation
                 passesFixationType = evt.total_fixations_in_region == 1 && ...
                                     (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
-            elseif fixationTypeOption == 4 % Multiple fixations
+            elseif fixationOptions == 4 && isfield(evt, 'total_fixations_in_region') % Multiple fixations
                 passesFixationType = evt.total_fixations_in_region > 1;
+            else
+                passesFixationType = true; % Default to true if no valid option or field
+            end
+        else
+            % Handle the case where fixationOptions is an array of multiple options
+            if isempty(fixationOptions) || any(fixationOptions == 1) % Any fixation included
+                passesFixationType = true;
+            else
+                % Check each option
+                for opt = fixationOptions
+                    if opt == 2 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1
+                        passesFixationType = true;
+                        break;
+                    elseif opt == 3 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
+                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
+                        passesFixationType = true;
+                        break;
+                    elseif opt == 4 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region > 1
+                        passesFixationType = true;
+                        break;
+                    end
+                end
             end
         end
         
-        % Saccade in direction filtering (looking at actual saccade before current fixation)
-        passesSaccadeInDirection = true;
-        if saccadeInDirectionOption > 1
-            % Find the saccade that led to this fixation
-            inSaccadeFound = false;
-            for jj = i-1:-1:1
-                if strcmp(EEG.event(jj).type, saccadeType)
-                    inSaccadeFound = true;
-                    % Calculate X-direction movement using saccade position data
-                    xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                    isForward = xChange > 0;
-                    
-                    % Check against filter options
-                    if saccadeInDirectionOption == 2 % Forward only
-                        passesSaccadeInDirection = isForward && abs(xChange) > 10; % Threshold to ignore tiny movements
-                    elseif saccadeInDirectionOption == 3 % Backward only
-                        passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
+        % Saccade in direction filtering - modified to handle multiple selection options
+        passesSaccadeInDirection = false;
+        
+        % Handle the case where saccadeInOptions is a single value (backward compatibility)
+        if isscalar(saccadeInOptions)
+            if saccadeInOptions == 1 % Any direction
+                passesSaccadeInDirection = true;
+            else
+                % Find the saccade that led to this fixation
+                inSaccadeFound = false;
+                for jj = mm-1:-1:1
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        inSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        
+                        % Check against filter options
+                        if saccadeInOptions == 2 % Forward only
+                            passesSaccadeInDirection = isForward && abs(xChange) > 10; % Threshold to ignore tiny movements
+                        elseif saccadeInOptions == 3 % Backward only
+                            passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
+                        elseif saccadeInOptions == 4 % Both
+                            passesSaccadeInDirection = abs(xChange) > 10;
+                        end
+                        break;
                     end
-                    break;
+                end
+                if ~inSaccadeFound && saccadeInOptions < 4
+                    passesSaccadeInDirection = false;
                 end
             end
-            if ~inSaccadeFound && saccadeInDirectionOption < 4
-                passesSaccadeInDirection = false;
+        else
+            % Handle the case where saccadeInOptions is an array of multiple options
+            if isempty(saccadeInOptions) || any(saccadeInOptions == 1) % Any direction included
+                passesSaccadeInDirection = true;
+            else
+                % Find the saccade that led to this fixation
+                inSaccadeFound = false;
+                xChange = 0;
+                isForward = false;
+                
+                for jj = mm-1:-1:1
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        inSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        break;
+                    end
+                end
+                
+                if inSaccadeFound && abs(xChange) > 10
+                    % Check each option
+                    for opt = saccadeInOptions
+                        if opt == 2 && isForward % Forward only
+                            passesSaccadeInDirection = true;
+                            break;
+                        elseif opt == 3 && ~isForward % Backward only
+                            passesSaccadeInDirection = true;
+                            break;
+                        elseif opt == 4 % Both
+                            passesSaccadeInDirection = true;
+                            break;
+                        end
+                    end
+                end
             end
         end
         
-        % Saccade out direction filtering (looking at actual saccade after current fixation)
-        passesSaccadeOutDirection = true;
-        if saccadeOutDirectionOption > 1
-            % Find the saccade that followed this fixation
-            outSaccadeFound = false;
-            for jj = i+1:length(EEG.event)
-                if strcmp(EEG.event(jj).type, saccadeType)
-                    outSaccadeFound = true;
-                    % Calculate X-direction movement using saccade position data
-                    xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                    isForward = xChange > 0;
-                    
-                    % Check against filter options
-                    if saccadeOutDirectionOption == 2 % Forward only
-                        passesSaccadeOutDirection = isForward && abs(xChange) > 10;
-                    elseif saccadeOutDirectionOption == 3 % Backward only
-                        passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
+        % Saccade out direction filtering - modified to handle multiple selection options
+        passesSaccadeOutDirection = false;
+        
+        % Handle the case where saccadeOutOptions is a single value (backward compatibility)
+        if isscalar(saccadeOutOptions)
+            if saccadeOutOptions == 1 % Any direction
+                passesSaccadeOutDirection = true;
+            else
+                % Look ahead to find the next saccade event
+                outSaccadeFound = false;
+                for jj = mm+1:length(EEG.event)
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        outSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        
+                        % Check against filter options
+                        if saccadeOutOptions == 2 % Forward only
+                            passesSaccadeOutDirection = isForward && abs(xChange) > 10;
+                        elseif saccadeOutOptions == 3 % Backward only
+                            passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
+                        elseif saccadeOutOptions == 4 % Both
+                            passesSaccadeOutDirection = abs(xChange) > 10;
+                        end
+                        break;
                     end
-                    break;
+                end
+                % If no next saccade was found and we're filtering for specific direction
+                if ~outSaccadeFound && saccadeOutOptions > 1 && saccadeOutOptions < 4
+                    passesSaccadeOutDirection = false;
                 end
             end
-            if ~outSaccadeFound && saccadeOutDirectionOption < 4
-                passesSaccadeOutDirection = false;
+        else
+            % Handle the case where saccadeOutOptions is an array of multiple options
+            if isempty(saccadeOutOptions) || any(saccadeOutOptions == 1) % Any direction included
+                passesSaccadeOutDirection = true;
+            else
+                % Look ahead to find the next saccade event
+                outSaccadeFound = false;
+                xChange = 0;
+                isForward = false;
+                
+                for jj = mm+1:length(EEG.event)
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        outSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        break;
+                    end
+                end
+                
+                if outSaccadeFound && abs(xChange) > 10
+                    % Check each option
+                    for opt = saccadeOutOptions
+                        if opt == 2 && isForward % Forward only
+                            passesSaccadeOutDirection = true;
+                            break;
+                        elseif opt == 3 && ~isForward % Backward only
+                            passesSaccadeOutDirection = true;
+                            break;
+                        elseif opt == 4 % Both
+                            passesSaccadeOutDirection = true;
+                            break;
+                        end
+                    end
+                end
             end
         end
         
         % Check if the event passes all filters
         passes = passesPassIndex && passesPrevRegion && passesNextRegion && ...
                  passesFixationType && passesSaccadeInDirection && passesSaccadeOutDirection;
-        
-        % Add debug information for important events
-        if isfield(evt, 'current_region') && any(strcmp(evt.current_region, timeLockedRegions))
-            fprintf('\nDebug Info for Event %d (type: %s):\n', i, evt.type);
-            fprintf('  Region: %s\n', evt.current_region);
-            if isfield(evt, 'is_first_pass_region')
-                fprintf('  First Pass: %s\n', mat2str(evt.is_first_pass_region));
-            end
-            if isfield(evt, 'total_fixations_in_region')
-                fprintf('  Total Fixations in Region: %d\n', evt.total_fixations_in_region);
-            end
-            if isfield(evt, 'previous_region')
-                fprintf('  Previous Region: %s\n', evt.previous_region);
-            end
-            
-            % Find the next fixation and report it
-            nextFixRegion = 'None';
-            for jj = i+1:length(EEG.event)
-                if startsWith(EEG.event(jj).type, fixationType) && isfield(EEG.event(jj), 'current_region')
-                    nextFixRegion = EEG.event(jj).current_region;
-                    fprintf('  Next Fixation: Event %d in region %s\n', jj, nextFixRegion);
-                    break;
-                end
-            end
-            
-            % Report filter status
-            fprintf('  Filter Results:\n');
-            fprintf('    Passes Time-Locked Region: %s\n', mat2str(passesTimeLockedRegion));
-            fprintf('    Passes Pass Index: %s\n', mat2str(passesPassIndex));
-            fprintf('    Passes Previous Region: %s\n', mat2str(passesPrevRegion));
-            fprintf('    Passes Next Region: %s\n', mat2str(passesNextRegion));
-            fprintf('    Passes Fixation Type: %s\n', mat2str(passesFixationType));
-            fprintf('    Passes Saccade In Direction: %s\n', mat2str(passesSaccadeInDirection));
-            fprintf('    Passes Saccade Out Direction: %s\n', mat2str(passesSaccadeOutDirection));
-            fprintf('    Overall Result: %s\n', mat2str(passes));
-        end
         
         % If the event passes all filters, update its type code
         if passes
@@ -564,19 +991,85 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
             % Combine to create the 6-digit code
             newType = sprintf('%s%s%s', condStr, regionStr, filterStr);
             
-            % Update the event type
-            filteredEEG.event(i).type = newType;
+            % Store the original type if this is the first time we're coding this event
+            if ~isfield(evt, 'original_type')
+                filteredEEG.event(mm).original_type = evt.type;
+            end
             
-            % Also store the filter information in a more accessible format
-            filteredEEG.event(i).eyesort_condition_code = condStr;
-            filteredEEG.event(i).eyesort_region_code = regionStr;
-            filteredEEG.event(i).eyesort_filter_code = filterStr;
-            filteredEEG.event(i).eyesort_full_code = newType;
+            % Check for existing code in the event
+            if isfield(evt, 'eyesort_full_code') && ~isempty(evt.eyesort_full_code)
+                % If there's an existing code, add to conflicting events
+                conflictingEvents{end+1} = struct(...
+                    'event_index', mm, ...
+                    'existing_code', evt.eyesort_full_code, ...
+                    'new_code', newType, ...
+                    'condition', evt.condition_number, ...
+                    'region', evt.current_region);
+            end
+            
+            % Update the event type and related fields
+            filteredEEG.event(mm).type = newType;
+            filteredEEG.event(mm).eyesort_condition_code = condStr;
+            filteredEEG.event(mm).eyesort_region_code = regionStr;
+            filteredEEG.event(mm).eyesort_filter_code = filterStr;
+            filteredEEG.event(mm).eyesort_full_code = newType;
+        end
+    end
+    
+    % Handle conflicting events if any were found
+    if ~isempty(conflictingEvents)
+        % Calculate percentage of conflicting events
+        conflictPercentage = (length(conflictingEvents) / matchedEventCount) * 100;
+        
+        % Create a detailed message about the conflicts
+        msgStr = sprintf(['Warning: Found %d events with conflicting codes (%.1f%% of matched events).\n\n', ...
+                         'This means these events match multiple filter criteria.\n', ...
+                         'You have two options:\n\n', ...
+                         '1. Keep the new codes (recommended if you want to apply\n', ...
+                         '   these filters separately)\n', ...
+                         '2. Keep the existing codes\n\n', ...
+                         'Recommendation: Consider using a copy of the same EEG dataset and apply these filters separately in case you need to isolate these events and\n', ...
+                         'avoid conflicts. You can do this by:\n', ...
+                         '1. Clicking "Cancel" now\n', ...
+                         '2. Applying one filter to each of the respecting datasets\n', ...
+                         '3. Using the "Finish filtering" button after applying the filters separately on two identical datasets\n\n', ...
+                         'Would you like to keep the new codes?'], ...
+                         length(conflictingEvents), conflictPercentage);
+        
+        % Show the warning dialog
+        choice = questdlg(msgStr, 'Conflicting Event Codes', ...
+                         'Keep New Codes', 'Keep Existing Codes', 'Keep New Codes');
+        
+        if strcmp(choice, 'Keep Existing Codes')
+            % Restore the original codes for conflicting events
+            for i = 1:length(conflictingEvents)
+                idx = conflictingEvents{i}.event_index;
+                origCode = conflictingEvents{i}.existing_code;
+                filteredEEG.event(idx).type = origCode;
+                filteredEEG.event(idx).eyesort_full_code = origCode;
+                % Restore the individual components
+                filteredEEG.event(idx).eyesort_condition_code = origCode(1:2);
+                filteredEEG.event(idx).eyesort_region_code = origCode(3:4);
+                filteredEEG.event(idx).eyesort_filter_code = origCode(5:6);
+            end
+            % Update matched count to exclude restored events
+            matchedEventCount = matchedEventCount - length(conflictingEvents);
         end
     end
     
     % Store the number of matched events for reference
     filteredEEG.eyesort_last_filter_matched_count = matchedEventCount;
+    
+    % Check if no events were found and show a warning
+    if matchedEventCount == 0
+        warndlg(['No events matched your filter criteria!\n\n'...
+                'This could be because:\n'...
+                '1. The filter criteria are too restrictive\n'...
+                '2. There is a mismatch between expected data structure and actual data\n'...
+                '3. The events that would match are already coded with a different filter\n\n'...
+                'Consider relaxing your criteria or checking for conflicts with existing filters.'], ...
+                'No Matching Events Found!', 'modal');
+    end
     
     % Return the filtered dataset with all events intact
     return;

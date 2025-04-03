@@ -228,44 +228,67 @@ else
             fprintf('\n--- Applying Filter #%d to all datasets ---\n', filterIdx);
             filterDesc = tempEEG.eyesort_filter_descriptions{filterIdx};
             
-            % Extract filter parameters
-            filterParams = struct();
-            filterParams.timeLockedRegions = filterDesc.regions;
-            filterParams.passIndex = filterDesc.pass_value;
-            filterParams.prevRegion = filterDesc.prev_region;
-            filterParams.nextRegion = filterDesc.next_region;
-            filterParams.fixationType = filterDesc.fixation_value;
+            % Prep filter parameters
+            filter_params = struct();
+            filter_params.timeLockedRegions = filterDesc.regions;
             
-            % Handle both old and new field names for saccade direction parameters
-            if isfield(filterDesc, 'saccade_value')
-                % Old format - single saccade direction
-                filterParams.saccadeInDirection = filterDesc.saccade_value;
-                filterParams.saccadeOutDirection = 1; % Default to "Any direction"
-            elseif isfield(filterDesc, 'saccade_in_value')
-                % New format - separate in/out directions
-                filterParams.saccadeInDirection = filterDesc.saccade_in_value;
-                filterParams.saccadeOutDirection = filterDesc.saccade_out_value;
-            else
-                % Fallback defaults
-                filterParams.saccadeInDirection = 1; % Any direction
-                filterParams.saccadeOutDirection = 1; % Any direction
+            % Extract pass options from either old or new format
+            if isfield(filterDesc, 'pass_options')
+                filter_params.pass_options = filterDesc.pass_options;
+            elseif isfield(filterDesc, 'passIndex')
+                filter_params.pass_options = filterDesc.passIndex;
             end
             
-            filterParams.filterCount = filterIdx;
+            % Extract previous region(s) from either old or new format
+            if isfield(filterDesc, 'prev_regions')
+                filter_params.prev_regions = filterDesc.prev_regions;
+            elseif isfield(filterDesc, 'prev_region')
+                filter_params.prev_regions = {filterDesc.prev_region};
+            end
+            
+            % Extract next region(s) from either old or new format
+            if isfield(filterDesc, 'next_regions')
+                filter_params.next_regions = filterDesc.next_regions;
+            elseif isfield(filterDesc, 'next_region')
+                filter_params.next_regions = {filterDesc.next_region};
+            end
+            
+            % Extract fixation options from either old or new format
+            if isfield(filterDesc, 'fixation_options')
+                filter_params.fixation_options = filterDesc.fixation_options;
+            elseif isfield(filterDesc, 'fixationType')
+                filter_params.fixation_options = filterDesc.fixationType;
+            end
+            
+            % Extract saccade in options from either old or new format
+            if isfield(filterDesc, 'saccade_in_options')
+                filter_params.saccade_in_options = filterDesc.saccade_in_options;
+            elseif isfield(filterDesc, 'saccadeInDirection')
+                filter_params.saccade_in_options = filterDesc.saccadeInDirection;
+            end
+            
+            % Extract saccade out options from either old or new format
+            if isfield(filterDesc, 'saccade_out_options')
+                filter_params.saccade_out_options = filterDesc.saccade_out_options;
+            elseif isfield(filterDesc, 'saccadeOutDirection')
+                filter_params.saccade_out_options = filterDesc.saccadeOutDirection;
+            end
+            
+            filter_params.filterCount = filterIdx;
             
             % Set filter code to be 1-indexed (01, 02, 03, etc.)
             filterCode = sprintf('%02d', filterIdx);
-            filterParams.forceFilterCode = filterCode;
+            filter_params.forceFilterCode = filterCode;
             
             fprintf('Setting filter code to "%s" for all datasets in this batch\n', filterCode);
             
             % Apply the filter to all datasets
             for i = 1:length(ALLEEG)
                 if isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event)
-                    fprintf('Applying filter #%d (code: %s) to dataset %d...\n', filterIdx, filterParams.forceFilterCode, i);
+                    fprintf('Applying filter #%d (code: %s) to dataset %d...\n', filterIdx, filter_params.forceFilterCode, i);
                     try
                         % Get filtered version of this dataset
-                        filteredEEG = batch_filter_dataset(ALLEEG(i), filterParams);
+                        filteredEEG = batch_filter_dataset(ALLEEG(i), filter_params);
                         
                         % Safe field-by-field copying to avoid structure mismatch errors
                         filteredFields = fieldnames(filteredEEG);

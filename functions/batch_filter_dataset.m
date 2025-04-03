@@ -1,48 +1,84 @@
 % Helper function for non-interactive batch filtering
 function EEG = batch_filter_dataset(EEG, params)
-    % Extract parameters from the params structure
-    if isfield(params, 'timeLockedRegions')
-        timeLockedRegions = params.timeLockedRegions;
-    else
-        % Default to first available region
-        allRegions = unique({EEG.event.current_region});
-        timeLockedRegions = {allRegions{1}};
+    % Check and extract various parameters
+    if ~isfield(params, 'timeLockedRegions')
+        error('Required parameter timeLockedRegions missing from batch parameters');
     end
     
-    if isfield(params, 'passIndex')
-        passIndexOption = params.passIndex;
+    timeLockedRegions = params.timeLockedRegions;
+    
+    % Handle pass_options (allow both old and new formats)
+    if isfield(params, 'pass_options')
+        pass_options = params.pass_options;
+    elseif isfield(params, 'passIndices')
+        % Convert old single value to array if needed
+        if ~isempty(params.passIndices)
+            pass_options = params.passIndices;
+        else
+            pass_options = 1; % Default to any pass
+        end
     else
-        passIndexOption = 1; % Any pass (default)
+        pass_options = 1; % Default to any pass
     end
     
-    if isfield(params, 'prevRegion')
-        prevRegion = params.prevRegion;
+    % Handle prev_regions (allow both old and new formats)
+    if isfield(params, 'prev_regions') && ~isempty(params.prev_regions)
+        prevRegions = params.prev_regions;
+    elseif isfield(params, 'prevRegion') && ~isempty(params.prevRegion)
+        prevRegions = {params.prevRegion}; % Convert old single value to cell array
     else
-        prevRegion = ''; % Any region (default)
+        prevRegions = {}; % Default to no previous region filter
     end
     
-    if isfield(params, 'nextRegion')
-        nextRegion = params.nextRegion;
+    % Handle next_regions (allow both old and new formats)
+    if isfield(params, 'next_regions') && ~isempty(params.next_regions)
+        nextRegions = params.next_regions;
+    elseif isfield(params, 'nextRegion') && ~isempty(params.nextRegion)
+        nextRegions = {params.nextRegion}; % Convert old single value to cell array
     else
-        nextRegion = ''; % Any region (default)
+        nextRegions = {}; % Default to no next region filter
     end
     
-    if isfield(params, 'fixationType')
-        fixationTypeOption = params.fixationType;
+    % Handle fixation_options (allow both old and new formats)
+    if isfield(params, 'fixation_options')
+        fixation_options = params.fixation_options;
+    elseif isfield(params, 'fixationType')
+        % Convert old single value to array if needed
+        if ~isempty(params.fixationType)
+            fixation_options = params.fixationType;
+        else
+            fixation_options = 1; % Default to any fixation
+        end
     else
-        fixationTypeOption = 1; % Any fixation (default)
+        fixation_options = 1; % Default to any fixation
     end
     
-    if isfield(params, 'saccadeInDirection')
-        saccadeInDirectionOption = params.saccadeInDirection;
+    % Handle saccade_in_options (allow both old and new formats)
+    if isfield(params, 'saccade_in_options')
+        saccade_in_options = params.saccade_in_options;
+    elseif isfield(params, 'saccadeInDirection')
+        % Convert old single value to array if needed
+        if ~isempty(params.saccadeInDirection)
+            saccade_in_options = params.saccadeInDirection;
+        else
+            saccade_in_options = 1; % Default to any direction
+        end
     else
-        saccadeInDirectionOption = 1; % Any direction (default)
+        saccade_in_options = 1; % Default to any direction
     end
     
-    if isfield(params, 'saccadeOutDirection')
-        saccadeOutDirectionOption = params.saccadeOutDirection;
+    % Handle saccade_out_options (allow both old and new formats)
+    if isfield(params, 'saccade_out_options')
+        saccade_out_options = params.saccade_out_options;
+    elseif isfield(params, 'saccadeOutDirection')
+        % Convert old single value to array if needed
+        if ~isempty(params.saccadeOutDirection)
+            saccade_out_options = params.saccadeOutDirection;
+        else
+            saccade_out_options = 1; % Default to any direction
+        end
     else
-        saccadeOutDirectionOption = 1; % Any direction (default)
+        saccade_out_options = 1; % Default to any direction
     end
     
     % Extract eyetracking field names from the EEG structure
@@ -93,9 +129,7 @@ function EEG = batch_filter_dataset(EEG, params)
     EEG.eyesort_filter_count = EEG.eyesort_filter_count + 1;
     currentFilterCount = EEG.eyesort_filter_count;
     
-    % Call the filter_dataset function directly to avoid GUI
-    % This function is internal to pop_filter_datasets.m but we're accessing it
-    % Copy from pop_filter_datasets.m's subfunction:
+    % Copy from pop_filter_datasets.m's subfunction with modifications for multiple options:
     
     % Create a copy of the EEG structure
     filteredEEG = EEG;
@@ -202,31 +236,53 @@ function EEG = batch_filter_dataset(EEG, params)
             continue;
         end
         
-        % Pass index filtering
-        passesPassIndex = true;
-        if passIndexOption > 1 && isfield(evt, 'is_first_pass_region')
-            if passIndexOption == 2 % First pass only
+        % Pass index filtering - modified to handle multiple selection options
+        passesPassIndex = false;
+        
+        % Handle the case where pass_options is a single value (backward compatibility)
+        if isscalar(pass_options)
+            if pass_options == 1 % Any pass
+                passesPassIndex = true;
+            elseif pass_options == 2 && isfield(evt, 'is_first_pass_region') % First pass only
                 passesPassIndex = evt.is_first_pass_region;
-            elseif passIndexOption == 3 % Not first pass
+            elseif pass_options == 3 && isfield(evt, 'is_first_pass_region') % Not first pass
                 passesPassIndex = ~evt.is_first_pass_region;
+            else
+                passesPassIndex = true; % Default to true if no valid option or field
+            end
+        else
+            % Handle the case where pass_options is an array of multiple options
+            if isempty(pass_options) || any(pass_options == 1) % Any pass included
+                passesPassIndex = true;
+            else
+                % Check each option
+                for opt = pass_options
+                    if opt == 2 && isfield(evt, 'is_first_pass_region') && evt.is_first_pass_region
+                        passesPassIndex = true;
+                        break;
+                    elseif opt == 3 && isfield(evt, 'is_first_pass_region') && ~evt.is_first_pass_region
+                        passesPassIndex = true;
+                        break;
+                    end
+                end
             end
         end
         
         % Previous region filtering
         passesPrevRegion = true;
-        if ~isempty(prevRegion) && isfield(evt, 'previous_region')
-            passesPrevRegion = strcmp(evt.previous_region, prevRegion);
+        if ~isempty(prevRegions)
+            passesPrevRegion = any(strcmp(evt.previous_region, prevRegions));
         end
         
         % Next region filtering (requires looking ahead)
         passesNextRegion = true;
-        if ~isempty(nextRegion)
+        if ~isempty(nextRegions)
             % Look ahead to find the next fixation event, not just the next event
             nextFixationFound = false;
             for jj = i+1:length(EEG.event)
                 if startsWith(EEG.event(jj).type, fixationType) && isfield(EEG.event(jj), 'current_region')
                     nextFixationFound = true;
-                    passesNextRegion = strcmp(EEG.event(jj).current_region, nextRegion);
+                    passesNextRegion = any(strcmp(EEG.event(jj).current_region, nextRegions));
                     break; % Stop after finding the next fixation
                 end
             end
@@ -236,69 +292,183 @@ function EEG = batch_filter_dataset(EEG, params)
             end
         end
         
-        % Fixation type filtering
-        passesFixationType = true;
-        if fixationTypeOption > 1 && isfield(evt, 'total_fixations_in_region')
-            if fixationTypeOption == 2 % First in region
+        % Fixation type filtering - modified to handle multiple selection options
+        passesFixationType = false;
+        
+        % Handle the case where fixation_options is a single value (backward compatibility)
+        if isscalar(fixation_options)
+            if fixation_options == 1 % Any fixation
+                passesFixationType = true;
+            elseif fixation_options == 2 && isfield(evt, 'total_fixations_in_region') % First in region
                 passesFixationType = evt.total_fixations_in_region == 1;
-            elseif fixationTypeOption == 3 % Single fixation
+            elseif fixation_options == 3 && isfield(evt, 'total_fixations_in_region') % Single fixation
                 passesFixationType = evt.total_fixations_in_region == 1 && ...
                                     (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
-            elseif fixationTypeOption == 4 % Multiple fixations
+            elseif fixation_options == 4 && isfield(evt, 'total_fixations_in_region') % Multiple fixations
                 passesFixationType = evt.total_fixations_in_region > 1;
+            else
+                passesFixationType = true; % Default to true if no valid option or field
+            end
+        else
+            % Handle the case where fixation_options is an array of multiple options
+            if isempty(fixation_options) || any(fixation_options == 1) % Any fixation included
+                passesFixationType = true;
+            else
+                % Check each option
+                for opt = fixation_options
+                    if opt == 2 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1
+                        passesFixationType = true;
+                        break;
+                    elseif opt == 3 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
+                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
+                        passesFixationType = true;
+                        break;
+                    elseif opt == 4 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region > 1
+                        passesFixationType = true;
+                        break;
+                    end
+                end
             end
         end
         
-        % Saccade in direction filtering (saccade before the current fixation)
-        passesSaccadeInDirection = true;
-        if saccadeInDirectionOption > 1
-            % Find the saccade that led to this fixation
-            inSaccadeFound = false;
-            for jj = i-1:-1:1
-                if strcmp(EEG.event(jj).type, saccadeType)
-                    inSaccadeFound = true;
-                    % Calculate X-direction movement using saccade position data
-                    xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                    isForward = xChange > 0;
-                    
-                    % Check against filter options
-                    if saccadeInDirectionOption == 2 % Forward only
-                        passesSaccadeInDirection = isForward && abs(xChange) > 10; % Threshold to ignore tiny movements
-                    elseif saccadeInDirectionOption == 3 % Backward only
-                        passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
+        % Saccade in direction filtering - modified to handle multiple selection options
+        passesSaccadeInDirection = false;
+        
+        % Handle the case where saccade_in_options is a single value (backward compatibility)
+        if isscalar(saccade_in_options)
+            if saccade_in_options == 1 % Any direction
+                passesSaccadeInDirection = true;
+            else
+                % Find the saccade that led to this fixation
+                inSaccadeFound = false;
+                for jj = i-1:-1:1
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        inSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        
+                        % Check against filter options
+                        if saccade_in_options == 2 % Forward only
+                            passesSaccadeInDirection = isForward && abs(xChange) > 10; % Threshold to ignore tiny movements
+                        elseif saccade_in_options == 3 % Backward only
+                            passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
+                        elseif saccade_in_options == 4 % Both
+                            passesSaccadeInDirection = abs(xChange) > 10;
+                        end
+                        break;
                     end
-                    break;
+                end
+                if ~inSaccadeFound && saccade_in_options < 4
+                    passesSaccadeInDirection = false;
                 end
             end
-            if ~inSaccadeFound && saccadeInDirectionOption < 4
-                passesSaccadeInDirection = false;
+        else
+            % Handle the case where saccade_in_options is an array of multiple options
+            if isempty(saccade_in_options) || any(saccade_in_options == 1) % Any direction included
+                passesSaccadeInDirection = true;
+            else
+                % Find the saccade that led to this fixation
+                inSaccadeFound = false;
+                xChange = 0;
+                isForward = false;
+                
+                for jj = i-1:-1:1
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        inSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        break;
+                    end
+                end
+                
+                if inSaccadeFound && abs(xChange) > 10
+                    % Check each option
+                    for opt = saccade_in_options
+                        if opt == 2 && isForward % Forward only
+                            passesSaccadeInDirection = true;
+                            break;
+                        elseif opt == 3 && ~isForward % Backward only
+                            passesSaccadeInDirection = true;
+                            break;
+                        elseif opt == 4 % Both
+                            passesSaccadeInDirection = true;
+                            break;
+                        end
+                    end
+                end
             end
         end
         
-        % Saccade out direction filtering (saccade after the current fixation)
-        passesSaccadeOutDirection = true;
-        if saccadeOutDirectionOption > 1
-            % Look ahead to find the next saccade event
-            outSaccadeFound = false;
-            for jj = i+1:length(EEG.event)
-                if strcmp(EEG.event(jj).type, saccadeType)
-                    outSaccadeFound = true;
-                    % Calculate X-direction movement using saccade position data
-                    xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                    isForward = xChange > 0;
-                    
-                    % Check against filter options
-                    if saccadeOutDirectionOption == 2 % Forward only
-                        passesSaccadeOutDirection = isForward && abs(xChange) > 10;
-                    elseif saccadeOutDirectionOption == 3 % Backward only
-                        passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
+        % Saccade out direction filtering - modified to handle multiple selection options
+        passesSaccadeOutDirection = false;
+        
+        % Handle the case where saccade_out_options is a single value (backward compatibility)
+        if isscalar(saccade_out_options)
+            if saccade_out_options == 1 % Any direction
+                passesSaccadeOutDirection = true;
+            else
+                % Look ahead to find the next saccade event
+                outSaccadeFound = false;
+                for jj = i+1:length(EEG.event)
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        outSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        
+                        % Check against filter options
+                        if saccade_out_options == 2 % Forward only
+                            passesSaccadeOutDirection = isForward && abs(xChange) > 10;
+                        elseif saccade_out_options == 3 % Backward only
+                            passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
+                        elseif saccade_out_options == 4 % Both
+                            passesSaccadeOutDirection = abs(xChange) > 10;
+                        end
+                        break;
                     end
-                    break;
+                end
+                % If no next saccade was found and we're filtering for specific direction
+                if ~outSaccadeFound && saccade_out_options > 1 && saccade_out_options < 4
+                    passesSaccadeOutDirection = false;
                 end
             end
-            % If no next saccade was found and we're filtering for specific direction
-            if ~outSaccadeFound && saccadeOutDirectionOption > 1 && saccadeOutDirectionOption < 4
-                passesSaccadeOutDirection = false;
+        else
+            % Handle the case where saccade_out_options is an array of multiple options
+            if isempty(saccade_out_options) || any(saccade_out_options == 1) % Any direction included
+                passesSaccadeOutDirection = true;
+            else
+                % Look ahead to find the next saccade event
+                outSaccadeFound = false;
+                xChange = 0;
+                isForward = false;
+                
+                for jj = i+1:length(EEG.event)
+                    if strcmp(EEG.event(jj).type, saccadeType)
+                        outSaccadeFound = true;
+                        % Calculate X-direction movement using saccade position data
+                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
+                        isForward = xChange > 0;
+                        break;
+                    end
+                end
+                
+                if outSaccadeFound && abs(xChange) > 10
+                    % Check each option
+                    for opt = saccade_out_options
+                        if opt == 2 && isForward % Forward only
+                            passesSaccadeOutDirection = true;
+                            break;
+                        elseif opt == 3 && ~isForward % Backward only
+                            passesSaccadeOutDirection = true;
+                            break;
+                        elseif opt == 4 % Both
+                            passesSaccadeOutDirection = true;
+                            break;
+                        end
+                    end
+                end
             end
         end
         
@@ -370,12 +540,12 @@ function EEG = batch_filter_dataset(EEG, params)
     filterDesc.filter_number = currentFilterCount;
     filterDesc.filter_code = sprintf('%02d', currentFilterCount);
     filterDesc.regions = timeLockedRegions;
-    filterDesc.pass_value = passIndexOption;
-    filterDesc.prev_region = prevRegion;
-    filterDesc.next_region = nextRegion;
-    filterDesc.fixation_value = fixationTypeOption;
-    filterDesc.saccade_in_value = saccadeInDirectionOption;
-    filterDesc.saccade_out_value = saccadeOutDirectionOption;
+    filterDesc.pass_options = pass_options;
+    filterDesc.prev_regions = prevRegions;
+    filterDesc.next_regions = nextRegions;
+    filterDesc.fixation_options = fixation_options;
+    filterDesc.saccade_in_options = saccade_in_options;
+    filterDesc.saccade_out_options = saccade_out_options;
     filterDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
     
     % Append to the filter descriptions

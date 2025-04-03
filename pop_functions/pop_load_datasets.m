@@ -1,8 +1,12 @@
 function [EEG, com] = pop_load_datasets(EEG)
 
+% *******************************
+% * THE LOAD DATASETS FUNCTION  *
+% *******************************
+
 % pop_load_datasets() - A "pop" function to load multiple EEG .set files
 %                       via a GUI dialog, then store them in ALLEEG.
-%                       Now supports directory-based batch processing.
+%                       Now supports directory-based batch processing (still needs to be fully integrated)
 %
 % Usage:
 %    >> [EEG, com] = pop_load_datasets(EEG);
@@ -14,6 +18,7 @@ function [EEG, com] = pop_load_datasets(EEG)
 %    EEG  - Updated EEG structure (the *last* loaded dataset).
 %    com  - Command string for the EEGLAB history.
 %
+% DESCRIPTION: Function is designed to allow the user to load in a single dataset or a directory of datasets to prepare for the rest of the EyeSort pipeline.
 
     % ---------------------------------------------------------------------
     % 1) Initialize outputs
@@ -28,7 +33,7 @@ function [EEG, com] = pop_load_datasets(EEG)
     selected_datasets = {};
     
     % Create the figure
-    hFig = figure('Name','Load EEG Datasets',...
+    hFig = figure('Name','Load EEG Dataset(s)',...
                   'NumberTitle','off',...
                   'MenuBar','none',...
                   'ToolBar','none',...
@@ -65,7 +70,7 @@ function [EEG, com] = pop_load_datasets(EEG)
         ... Row 4:
         {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_dataset()}, ...
         {'Style', 'pushbutton', 'string', 'Clear All', 'callback', @(~,~) clear_all_datasets()}, ...
-        {}, {}, ...
+        {}, {'Style', 'pushbutton', 'string', 'Confirm', 'callback', @(~,~) confirm_selection()}, ...
         ... Row 5: Separator
         {'Style', 'text', 'string', '-- OR --', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ...
         ... Row 6: Directory selection option
@@ -86,7 +91,7 @@ function [EEG, com] = pop_load_datasets(EEG)
         {'Style', 'pushbutton', 'string', 'Cancel', 'callback', @(~,~) cancel_button()}, ...
         {}, ...
         {}, ...
-        {'Style', 'pushbutton', 'string', 'Confirm', 'callback', @(~,~) confirm_selection()}, ...
+        {'Style', 'pushbutton', 'string', 'Process Batch', 'callback', @(~,~) process_batch()}, ...
     };
     
      
@@ -101,7 +106,7 @@ function [EEG, com] = pop_load_datasets(EEG)
     selectedDir = '';
     outputDir = '';
 
-%% ----------------------- Callback Functions --------------------------
+%% ----------------------- NestedCallback Functions --------------------------
 
     % -- BROWSE FOR DATASETS --
     function browse_for_datasets(~,~)
@@ -241,7 +246,7 @@ function [EEG, com] = pop_load_datasets(EEG)
                         end
                         
                         % Process using text interest areas & trial labeling would happen in later steps
-                        % We're just loading the datasets here
+                        % Just loading the datasets here
                         
                         % Save the processed dataset to the output directory
                         [~, fileName, ~] = fileparts(fileList(i).name);
@@ -277,7 +282,7 @@ function [EEG, com] = pop_load_datasets(EEG)
                 errordlg(['Error during batch processing: ' ME.message], 'Error');
             end
             
-        % INDIVIDUAL DATASETS PROCESSING (original method)
+        % INDIVIDUAL DATASETS PROCESSING
         else
             % Loop through selected datasets and load them
             for i = 1:numel(selected_datasets)
@@ -341,7 +346,7 @@ function [EEG, com] = pop_load_datasets(EEG)
             com = 'EEG = pop_load_datasets(EEG);';
 
             % Show success message
-            msgbox('Datasets loaded successfully into EEGLAB.', 'Success');
+            msgbox('Dataset(s) loaded successfully into EEGLAB.', 'Success');
         end
         
         close(hFig);
