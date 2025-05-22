@@ -99,12 +99,12 @@ for i = 1:length(processedEEGs)
         EEG = processedEEGs{i};
         fprintf('Processing dataset %d of %d...\n', i, length(processedEEGs));
         
-        EEG = new_combined_compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
+        EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                           numRegions, regionNames, conditionColName, itemColName, ...
                           startCode, endCode, conditionTriggers, itemTriggers, ...
                           fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
         
-        % No need to call new_trial_labelling separately, it's now called inside new_combined_compute_text_based_ia
+        % No need to call new_trial_labelling separately, it's now called inside compute_text_based_ia
         
         processedEEGs{i} = EEG;
         fprintf('Dataset %d processed successfully.\n', i);

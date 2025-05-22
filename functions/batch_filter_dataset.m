@@ -243,10 +243,12 @@ function EEG = batch_filter_dataset(EEG, params)
         if isscalar(pass_options)
             if pass_options == 1 % Any pass
                 passesPassIndex = true;
-            elseif pass_options == 2 && isfield(evt, 'is_first_pass_region') % First pass only
-                passesPassIndex = evt.is_first_pass_region;
-            elseif pass_options == 3 && isfield(evt, 'is_first_pass_region') % Not first pass
-                passesPassIndex = ~evt.is_first_pass_region;
+            elseif pass_options == 2 && isfield(evt, 'region_pass_number') % First pass only
+                passesPassIndex = evt.region_pass_number == 1;
+            elseif pass_options == 3 && isfield(evt, 'region_pass_number') % Second pass only
+                passesPassIndex = evt.region_pass_number == 2;
+            elseif pass_options == 4 && isfield(evt, 'region_pass_number') % Third pass and beyond
+                passesPassIndex = evt.region_pass_number >= 3;
             else
                 passesPassIndex = true; % Default to true if no valid option or field
             end
@@ -257,10 +259,13 @@ function EEG = batch_filter_dataset(EEG, params)
             else
                 % Check each option
                 for opt = pass_options
-                    if opt == 2 && isfield(evt, 'is_first_pass_region') && evt.is_first_pass_region
+                    if opt == 2 && isfield(evt, 'region_pass_number') && evt.region_pass_number == 1
                         passesPassIndex = true;
                         break;
-                    elseif opt == 3 && isfield(evt, 'is_first_pass_region') && ~evt.is_first_pass_region
+                    elseif opt == 3 && isfield(evt, 'region_pass_number') && evt.region_pass_number == 2
+                        passesPassIndex = true;
+                        break;
+                    elseif opt == 4 && isfield(evt, 'region_pass_number') && evt.region_pass_number >= 3
                         passesPassIndex = true;
                         break;
                     end
@@ -271,23 +276,29 @@ function EEG = batch_filter_dataset(EEG, params)
         % Previous region filtering
         passesPrevRegion = true;
         if ~isempty(prevRegions)
-            passesPrevRegion = any(strcmp(evt.previous_region, prevRegions));
+            passesPrevRegion = any(strcmp(evt.last_region_visited, prevRegions));
         end
         
         % Next region filtering (requires looking ahead)
         passesNextRegion = true;
         if ~isempty(nextRegions)
-            % Look ahead to find the next fixation event, not just the next event
-            nextFixationFound = false;
+            % Look ahead to find the next fixation event in a different region
+            nextDifferentRegionFound = false;
+            currentRegion = evt.current_region;
+            
             for jj = i+1:length(EEG.event)
                 if startsWith(EEG.event(jj).type, fixationType) && isfield(EEG.event(jj), 'current_region')
-                    nextFixationFound = true;
-                    passesNextRegion = any(strcmp(EEG.event(jj).current_region, nextRegions));
-                    break; % Stop after finding the next fixation
+                    % Only consider fixations in a different region than the current one
+                    if ~strcmp(EEG.event(jj).current_region, currentRegion)
+                        nextDifferentRegionFound = true;
+                        passesNextRegion = any(strcmp(EEG.event(jj).current_region, nextRegions));
+                        break; % Stop after finding the next fixation in a different region
+                    end
                 end
             end
-            % If no next fixation was found, this can't pass the next region filter
-            if ~nextFixationFound
+            
+            % If no next fixation in a different region was found, this can't pass the next region filter
+            if ~nextDifferentRegionFound
                 passesNextRegion = false;
             end
         end
@@ -299,13 +310,29 @@ function EEG = batch_filter_dataset(EEG, params)
         if isscalar(fixation_options)
             if fixation_options == 1 % Any fixation
                 passesFixationType = true;
-            elseif fixation_options == 2 && isfield(evt, 'total_fixations_in_region') % First in region
-                passesFixationType = evt.total_fixations_in_region == 1;
-            elseif fixation_options == 3 && isfield(evt, 'total_fixations_in_region') % Single fixation
-                passesFixationType = evt.total_fixations_in_region == 1 && ...
-                                    (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
-            elseif fixation_options == 4 && isfield(evt, 'total_fixations_in_region') % Multiple fixations
-                passesFixationType = evt.total_fixations_in_region > 1;
+            elseif fixation_options == 2 && isfield(evt, 'fixation_in_pass') % First in region
+                passesFixationType = evt.fixation_in_pass == 1;
+            elseif fixation_options == 3 && isfield(evt, 'fixation_in_pass') % Single fixation
+                % Single fixation means it's both first and last in pass
+                passesFixationType = evt.fixation_in_pass == 1 && ...
+                    ~any([EEG.event.trial_number] == evt.trial_number & ...
+                         strcmp({EEG.event.current_region}, evt.current_region) & ...
+                         [EEG.event.region_pass_number] == evt.region_pass_number & ...
+                         [EEG.event.fixation_in_pass] > 1);
+            elseif fixation_options == 4 && isfield(evt, 'fixation_in_pass') % Second of multiple
+                passesFixationType = evt.fixation_in_pass == 2;
+            elseif fixation_options == 5 && isfield(evt, 'fixation_in_pass') % All subsequent fixations
+                passesFixationType = evt.fixation_in_pass > 2;
+            elseif fixation_options == 6 && isfield(evt, 'fixation_in_pass') % Last in region
+                % Find all fixations in this region, trial, and pass
+                sameRegionFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                           strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                           [EEG.event.region_pass_number] == evt.region_pass_number);
+                % It's the last fixation if it has the highest fixation_in_pass value
+                if ~isempty(sameRegionFixations)
+                    maxFixInPass = max([EEG.event(sameRegionFixations).fixation_in_pass]);
+                    passesFixationType = evt.fixation_in_pass == maxFixInPass;
+                end
             else
                 passesFixationType = true; % Default to true if no valid option or field
             end
@@ -316,16 +343,36 @@ function EEG = batch_filter_dataset(EEG, params)
             else
                 % Check each option
                 for opt = fixation_options
-                    if opt == 2 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1
+                    if opt == 2 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass == 1
                         passesFixationType = true;
                         break;
-                    elseif opt == 3 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
-                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
+                    elseif opt == 3 && isfield(evt, 'fixation_in_pass') && ...
+                           evt.fixation_in_pass == 1 && ...
+                           ~any([EEG.event.trial_number] == evt.trial_number & ...
+                                strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                [EEG.event.region_pass_number] == evt.region_pass_number & ...
+                                [EEG.event.fixation_in_pass] > 1)
                         passesFixationType = true;
                         break;
-                    elseif opt == 4 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region > 1
+                    elseif opt == 4 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass == 2
                         passesFixationType = true;
                         break;
+                    elseif opt == 5 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass > 2
+                        passesFixationType = true;
+                        break;
+                    elseif opt == 6 && isfield(evt, 'fixation_in_pass')
+                        % Find all fixations in this region, trial, and pass
+                        sameRegionFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                                   strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                                   [EEG.event.region_pass_number] == evt.region_pass_number);
+                        % It's the last fixation if it has the highest fixation_in_pass value
+                        if ~isempty(sameRegionFixations)
+                            maxFixInPass = max([EEG.event(sameRegionFixations).fixation_in_pass]);
+                            if evt.fixation_in_pass == maxFixInPass
+                                passesFixationType = true;
+                                break;
+                            end
+                        end
                     end
                 end
             end

@@ -121,8 +121,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
                   'Position', [100 100 680 700]);
     
     % Define the options to be used for checkboxes
-    passTypeOptions = {'First pass only', 'Not first pass'};
-    fixationTypeOptions = {'First in region', 'Single fixation', 'All but first fixations'};
+    passTypeOptions = {'First pass only', 'Second pass only', 'Third pass and beyond'};
+    fixationTypeOptions = {'First in region', 'Single fixation', 'Second of multiple', 'All subsequent fixations', 'Last in region'};
     saccadeInDirectionOptions = {'Forward only', 'Backward only'};
     saccadeOutDirectionOptions = {'Forward only', 'Backward only'};
     
@@ -178,7 +178,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     additionalGeomHoriz = { ...
         1, ...                 % Pass Type Selection title
         1, ...                % Pass Type Selection Description
-        [0.5 0.5], ...         % Pass type checkboxes
+        [0.33 0.33 0.34], ...         % Pass type checkboxes
         1, ...                 % Previous Region Navigation title
         1  ...                 % Previous Region Navigation Description
     };
@@ -190,10 +190,11 @@ function [EEG, com] = pop_filter_datasets(EEG)
         ...
         {'Style','checkbox','String', passTypeOptions{1}, 'tag','chkPass1'}, ...
         {'Style','checkbox','String', passTypeOptions{2}, 'tag','chkPass2'}, ...
+        {'Style','checkbox','String', passTypeOptions{3}, 'tag','chkPass3'}, ...
         ...
         {'Style','text','String','Previous Region Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates the previous region of interest for where the last fixation was located.'}, ...
+        {'Style','text','String','Indicates the last different region visited before entering the current region.'}, ...
     };
     
     % Add Previous Region checkboxes with similar logic
@@ -219,7 +220,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     additionalGeomHoriz{end+1} = 1;  % Next Region title
     additionalGeomHoriz{end+1} = 1;  % Next Region description
     additionalUIList{end+1} = {'Style','text','String','Next Region Selection:', 'FontWeight', 'bold'};
-    additionalUIList{end+1} = {'Style','text','String','Indicates the next region of interest for where the next fixation was located.'};
+    additionalUIList{end+1} = {'Style','text','String','Indicates the next different region visited after leaving the current region.'};
     
     % Add Next Region checkboxes with similar logic
     for row = 1:numRows
@@ -244,11 +245,11 @@ function [EEG, com] = pop_filter_datasets(EEG)
     additionalGeomHoriz = [additionalGeomHoriz, { ...
         1, ...                       % Fixation Type Selection title
         1, ...                       % Fixation Type Description
-        [0.33 0.33 0.34], ...        % Fixation type checkboxes
+        [0.2 0.2 0.2 0.2 0.2], ...   % Fixation type checkboxes
         1, ...                       % Saccade Direction Selection title
         1, ...                       % Saccade Direction Description
-        [0.33 0.33 0.33], ...   % Saccade In label and checkboxes
-        [0.33 0.33 0.33], ...   % Saccade Out label and checkboxes
+        [0.33 0.33 0.33], ...        % Saccade In label and checkboxes
+        [0.33 0.33 0.33], ...        % Saccade Out label and checkboxes
         1, ...                       % Spacer
         [2 1 1.5 1.5] ...            % Buttons
     }];
@@ -261,6 +262,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         {'Style','checkbox','String', fixationTypeOptions{1}, 'tag','chkFixType1'}, ...
         {'Style','checkbox','String', fixationTypeOptions{2}, 'tag','chkFixType2'}, ...
         {'Style','checkbox','String', fixationTypeOptions{3}, 'tag','chkFixType3'}, ...
+        {'Style','checkbox','String', fixationTypeOptions{4}, 'tag','chkFixType4'}, ...
+        {'Style','checkbox','String', fixationTypeOptions{5}, 'tag','chkFixType5'}, ...
         ...
         {'Style','text','String','Saccade Direction Selection:', 'FontWeight', 'bold'}, ...
         ...
@@ -333,56 +336,57 @@ function [EEG, com] = pop_filter_datasets(EEG)
         apply_filter_internal(false);
     end
 
-    % Shared function to apply filters
-    function apply_filter_internal(shouldClose)
-        % Retrieve filter selections from the GUI - now using checkboxes for regions
-        % Preallocate arrays with max possible size
-        selectedTimeLockedRegions = zeros(1, length(regionCheckboxTags));
-        timeLockedRegionValues = cell(1, length(regionCheckboxTags));
-        numSelected = 0;
-        
-        % Get selected regions from checkboxes 
-        for j = 1:length(regionCheckboxTags)
-            if get(findobj('tag', regionCheckboxTags{j}), 'Value') == 1
-                numSelected = numSelected + 1;
-                selectedTimeLockedRegions(numSelected) = j;
-                timeLockedRegionValues{numSelected} = regionNames{j};
+    % Actual filter implementation - shared by both apply and finish buttons
+    function apply_filter_internal(finishAfter)
+        % Check if any region is selected
+        regionSelected = false;
+        for ii = 1:length(regionCheckboxTags)
+            if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
+                regionSelected = true;
+                break;
             end
         end
-        % Trim to actual size
-        selectedTimeLockedRegions = selectedTimeLockedRegions(1:numSelected);
-        timeLockedRegionValues = timeLockedRegionValues(1:numSelected);
+        
+        if ~regionSelected
+            errordlg('Please select at least one time-locked region to filter on.', 'Error');
+            return;
+        end
+        
+        % Get selected time-locked regions from checkboxes
+        selectedRegions = {};
+        for ii = 1:length(regionCheckboxTags)
+            if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
+                selectedRegions{end+1} = regionNames{ii};
+            end
+        end
         
         % Get checkbox states for pass type options
         passFirstPass = get(findobj('tag','chkPass1'), 'Value');
-        passNotFirstPass = get(findobj('tag','chkPass2'), 'Value');
+        passSecondPass = get(findobj('tag','chkPass2'), 'Value');
+        passThirdBeyond = get(findobj('tag','chkPass3'), 'Value');
         
         % Get selected previous regions from checkboxes
-        selectedPrevRegions = cell(1, length(prevRegionCheckboxTags));
-        numPrevSelected = 0;
-        for j = 1:length(prevRegionCheckboxTags)
-            if get(findobj('tag', prevRegionCheckboxTags{j}), 'Value') == 1
-                numPrevSelected = numPrevSelected + 1;
-                selectedPrevRegions{numPrevSelected} = regionNames{j};
+        selectedPrevRegions = {};
+        for ii = 1:length(prevRegionCheckboxTags)
+            if get(findobj('tag', prevRegionCheckboxTags{ii}), 'Value') == 1
+                selectedPrevRegions{end+1} = regionNames{ii};
             end
         end
-        selectedPrevRegions = selectedPrevRegions(1:numPrevSelected);
         
         % Get selected next regions from checkboxes
-        selectedNextRegions = cell(1, length(nextRegionCheckboxTags));
-        numNextSelected = 0;
-        for j = 1:length(nextRegionCheckboxTags)
-            if get(findobj('tag', nextRegionCheckboxTags{j}), 'Value') == 1
-                numNextSelected = numNextSelected + 1;
-                selectedNextRegions{numNextSelected} = regionNames{j};
+        selectedNextRegions = {};
+        for ii = 1:length(nextRegionCheckboxTags)
+            if get(findobj('tag', nextRegionCheckboxTags{ii}), 'Value') == 1
+                selectedNextRegions{end+1} = regionNames{ii};
             end
         end
-        selectedNextRegions = selectedNextRegions(1:numNextSelected);
         
         % Get checkbox states for fixation type options
         fixFirstInRegion = get(findobj('tag','chkFixType1'), 'Value');
         fixSingleFixation = get(findobj('tag','chkFixType2'), 'Value');
-        fixMultipleFixations = get(findobj('tag','chkFixType3'), 'Value');
+        fixSecondMultiple = get(findobj('tag','chkFixType3'), 'Value');
+        fixAllSubsequent = get(findobj('tag','chkFixType4'), 'Value');
+        fixLastInRegion = get(findobj('tag','chkFixType5'), 'Value');
         
         % Get checkbox states for saccade in direction options
         saccadeInForward = get(findobj('tag','chkSaccadeIn1'), 'Value');
@@ -392,49 +396,28 @@ function [EEG, com] = pop_filter_datasets(EEG)
         saccadeOutForward = get(findobj('tag','chkSaccadeOut1'), 'Value');
         saccadeOutBackward = get(findobj('tag','chkSaccadeOut2'), 'Value');
         
-        % Check for valid region data
-        if strcmp(regionNames{1}, 'No regions found')
-            errordlg('Cannot apply filter: Missing region data in current EEG structure.', 'Error');
-            return;
-        end
-        
-        % Check if any region is selected
-        if isempty(timeLockedRegionValues)
-            errordlg('Please select at least one time-locked region.', 'No Region Selected');
-            return;
-        end
-        
-        %{
-        % Get previous/next region values (if any)
-        prevRegion = '';
-        if length(selectedPrevRegions) > 0
-            prevRegion = selectedPrevRegions{1};
-        end
-        
-        nextRegion = '';
-        if length(selectedNextRegions) > 0
-            nextRegion = selectedNextRegions{1};
-        end
-        %}
-        
         % Create arrays to hold selected options - preallocate maximum size
-        passOptions = zeros(1, 2);  % Max 2 options (First pass and Not first pass)
+        passOptions = zeros(1, 3);  % Max 3 options
         passCount = 0;
         if passFirstPass
             passCount = passCount + 1;
             passOptions(passCount) = 2; % First pass only
         end
-        if passNotFirstPass
+        if passSecondPass
             passCount = passCount + 1;
-            passOptions(passCount) = 3; % Not first pass
+            passOptions(passCount) = 3; % Second pass only
+        end
+        if passThirdBeyond
+            passCount = passCount + 1;
+            passOptions(passCount) = 4; % Third pass and beyond
         end
         if passCount == 0
             passOptions = 1; % Any pass (default if none selected)
         else
-            passOptions = passOptions(1:passCount);
+            passOptions = passOptions(1:passCount); % Trim to actual size
         end
         
-        fixationOptions = zeros(1, 3);  % Max 3 options
+        fixationOptions = zeros(1, 5);  % Max 5 options
         fixCount = 0;
         if fixFirstInRegion
             fixCount = fixCount + 1;
@@ -444,14 +427,22 @@ function [EEG, com] = pop_filter_datasets(EEG)
             fixCount = fixCount + 1;
             fixationOptions(fixCount) = 3; % Single fixation
         end
-        if fixMultipleFixations
+        if fixSecondMultiple
             fixCount = fixCount + 1;
-            fixationOptions(fixCount) = 4; % Multiple fixations
+            fixationOptions(fixCount) = 4; % Second of multiple
+        end
+        if fixAllSubsequent
+            fixCount = fixCount + 1;
+            fixationOptions(fixCount) = 5; % All subsequent fixations
+        end
+        if fixLastInRegion
+            fixCount = fixCount + 1;
+            fixationOptions(fixCount) = 6; % Last in region
         end
         if fixCount == 0
             fixationOptions = 1; % Any fixation (default if none selected)
         else
-            fixationOptions = fixationOptions(1:fixCount);
+            fixationOptions = fixationOptions(1:fixCount); % Trim to actual size
         end
         
         saccadeInOptions = zeros(1, 2);  % Max 2 options
@@ -491,7 +482,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
         currentFilterCount = EEG.eyesort_filter_count;
         
         try
-            filteredEEG = filter_dataset(EEG, conditionSet, itemSet, timeLockedRegionValues, ...
+            filteredEEG = filter_dataset(EEG, conditionSet, itemSet, selectedRegions, ...
                                          passOptions, selectedPrevRegions, selectedNextRegions, ...
                                          fixationOptions, saccadeInOptions, saccadeOutOptions, currentFilterCount, ...
                                          fixationType, fixationXField, saccadeType, ...
@@ -504,7 +495,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
             filterDesc = struct();
             filterDesc.filter_number = currentFilterCount;
             filterDesc.filter_code = sprintf('%02d', currentFilterCount);
-            filterDesc.regions = timeLockedRegionValues;
+            filterDesc.regions = selectedRegions;
             filterDesc.pass_options = passOptions;
             filterDesc.prev_regions = selectedPrevRegions;
             filterDesc.next_regions = selectedNextRegions;
@@ -533,7 +524,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
                                 'Where: CC = condition code, RR = region code, FF = filter code (%02d)\n\n',...
                                 '%s'],...
                                 currentFilterCount, filteredEEG.eyesort_last_filter_matched_count, currentFilterCount, ...
-                                iif(shouldClose, 'Filtering complete!', 'You can now apply another filter or click Finish when done.'));
+                                iif(finishAfter, 'Filtering complete!', 'You can now apply another filter or click Finish when done.'));
                 
                 hMsg = msgbox(msgStr, sprintf('Filter #%d Applied', currentFilterCount), 'help');
             else
@@ -549,7 +540,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
                                 '- Verifying your dataset contains the expected fields\n\n',...
                                 '%s'],...
                                 currentFilterCount, ...
-                                iif(shouldClose, 'Filtering complete!', 'You can modify your filter settings and try again.'));
+                                iif(finishAfter, 'Filtering complete!', 'You can modify your filter settings and try again.'));
                 
                 hMsg = msgbox(msgStr, sprintf('No Events Found - Filter #%d', currentFilterCount), 'warn');
             end
@@ -562,7 +553,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
             % Wait for user to click OK instead of auto-closing
             waitfor(hMsg);
             
-            if shouldClose
+            if finishAfter
                 uiresume(gcf);  % Resume execution to let uiwait finish
                 close(gcf);
             else
@@ -744,14 +735,16 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
         % Previous region filtering
         passesPrevRegion = true;
         if ~isempty(prevRegions)
-            passesPrevRegion = any(strcmp(evt.previous_region, prevRegions));
+            passesPrevRegion = any(strcmp(evt.last_region_visited, prevRegions));
         end
         
         % Next region filtering (requires looking ahead)
         passesNextRegion = true;
         if ~isempty(nextRegions)
-            % Look ahead to find the next fixation event, not just the next event
-            nextFixationFound = false;
+            % Look ahead to find the next fixation event in a different region
+            nextDifferentRegionFound = false;
+            currentRegion = evt.current_region;
+            
             for jj = mm+1:length(EEG.event)
                 % Need to check both original fixation types and coded events
                 nextEvt = EEG.event(jj);
@@ -766,13 +759,16 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
                 end
                 
                 if isNextFixation && isfield(nextEvt, 'current_region')
-                    nextFixationFound = true;
-                    passesNextRegion = any(strcmp(nextEvt.current_region, nextRegions));
-                    break; % Stop after finding the next fixation
+                    % Only consider fixations in a different region than the current one
+                    if ~strcmp(nextEvt.current_region, currentRegion)
+                        nextDifferentRegionFound = true;
+                        passesNextRegion = any(strcmp(nextEvt.current_region, nextRegions));
+                        break; % Stop after finding the next fixation in a different region
+                    end
                 end
             end
-            % If no next fixation was found, this can't pass the next region filter
-            if ~nextFixationFound
+            % If no next fixation in a different region was found, this can't pass the next region filter
+            if ~nextDifferentRegionFound
                 passesNextRegion = false;
             end
         end
@@ -791,6 +787,9 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
                                     (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
             elseif fixationOptions == 4 && isfield(evt, 'total_fixations_in_region') % Multiple fixations
                 passesFixationType = evt.total_fixations_in_region > 1;
+            elseif fixationOptions == 5 && isfield(evt, 'total_fixations_in_region') % Last in region
+                passesFixationType = evt.total_fixations_in_region == 1 && ...
+                                    (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
             else
                 passesFixationType = true; % Default to true if no valid option or field
             end
@@ -809,6 +808,10 @@ function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions,
                         passesFixationType = true;
                         break;
                     elseif opt == 4 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region > 1
+                        passesFixationType = true;
+                        break;
+                    elseif opt == 5 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
+                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
                         passesFixationType = true;
                         break;
                     end
