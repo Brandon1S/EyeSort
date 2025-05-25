@@ -396,8 +396,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             end
         end
     end
-    EEG.saved = 'yes';
-
+    
     % Second pass to compute next_region_visited field - this requires knowing all future fixations
     fprintf('Computing next_region_visited field...\n');
     for iTrial = 1:max([EEG.event.trial_number])

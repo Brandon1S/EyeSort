@@ -19,6 +19,8 @@ function [EEG, com] = pop_load_text_ia(EEG)
     geomhoriz = { ...
         [1 0.5]       % Text File and browse button
         1             % Dataset listbox
+        1             % Spacer for Save/Load section
+        [0.33 0.33 0.34]   % Save config, Load config, Load last config buttons
         1             % Spacer
         [2 1]         % Offset edit box
         [2 1]         % Pixels per char edit box
@@ -47,6 +49,12 @@ function [EEG, com] = pop_load_text_ia(EEG)
         {'Style','pushbutton','String','Browse','callback', @browseTxtFile}, ...
         ...
         {'Style', 'listbox', 'tag', 'datasetList', 'string', {}, 'Max', 10, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
+        ...
+        {}, ...
+        ...
+        {'Style','pushbutton','String','Save Config','callback', @save_config_callback}, ...
+        {'Style','pushbutton','String','Load Config','callback', @load_config_callback}, ...
+        {'Style','pushbutton','String','Load Last Config','callback', @load_last_config_callback}, ...
         ...
         {}, ...
         ... 
@@ -127,13 +135,178 @@ function [EEG, com] = pop_load_text_ia(EEG)
         disp('User selected cancel: No text file for text interest areas');
     end
 
-    function confirm_button(~,~)
-        % Get current EEG from base workspace
+    function save_config_callback(~,~)
+        % Gather current GUI settings into a config structure
+        config = collect_gui_settings();
+        if isempty(config)
+            return; % Error occurred in collection
+        end
+        
+        % Prompt user for filename
+        [filename, filepath] = uiputfile('*.mat', 'Save Text IA Configuration', 'my_text_ia_config.mat');
+        if isequal(filename, 0)
+            return; % User cancelled
+        end
+        
+        full_filename = fullfile(filepath, filename);
+        
         try
-            EEG = evalin('base', 'EEG');
+            save_text_ia_config(config, full_filename);
+            msgbox(sprintf('Configuration saved successfully to:\n%s', full_filename), 'Save Complete', 'help');
         catch ME
-            errordlg('No EEG dataset loaded in EEGLAB.', 'Error');
-            return;
+            errordlg(['Error saving configuration: ' ME.message], 'Save Error');
+        end
+    end
+
+    function load_config_callback(~,~)
+        try
+            config = load_text_ia_config(); % Will show file dialog
+            if isempty(config)
+                return; % User cancelled
+            end
+            
+            apply_config_to_gui(config);
+            msgbox('Configuration loaded successfully!', 'Load Complete', 'help');
+        catch ME
+            errordlg(['Error loading configuration: ' ME.message], 'Load Error');
+        end
+    end
+
+    function load_last_config_callback(~,~)
+        try
+            if ~check_last_text_ia_config()
+                msgbox('No previous configuration found. Use "Save Config" first to create a saved configuration.', 'No Previous Config', 'warn');
+                return;
+            end
+            
+            config = load_text_ia_config('last_text_ia_config.mat');
+            apply_config_to_gui(config);
+            msgbox('Last configuration loaded successfully!', 'Load Complete', 'help');
+        catch ME
+            errordlg(['Error loading last configuration: ' ME.message], 'Load Error');
+        end
+    end
+
+    function config = collect_gui_settings()
+        % Collect all current GUI settings into a configuration structure
+        config = struct();
+        
+        try
+            % Text file selection
+            config.txtFileList = txtFileList;
+            
+            % Numeric parameters
+            config.offset = get(findobj('tag','edtOffset'), 'String');
+            config.pxPerChar = get(findobj('tag','edtPxPerChar'), 'String');
+            config.numRegions = get(findobj('tag','edtNumRegions'), 'String');
+            
+            % Text parameters
+            config.regionNames = get(findobj('tag','edtRegionNames'), 'String');
+            config.conditionColName = get(findobj('tag','edtCondName'), 'String');
+            config.itemColName = get(findobj('tag','edtItemName'), 'String');
+            config.startCode = get(findobj('tag','edtStartCode'), 'String');
+            config.endCode = get(findobj('tag','edtEndCode'), 'String');
+            config.condTriggers = get(findobj('tag','edtCondTriggers'), 'String');
+            config.itemTriggers = get(findobj('tag','edtItemTriggers'), 'String');
+            
+            % Field name parameters
+            config.fixationType = get(findobj('tag','edtFixationType'), 'String');
+            config.fixationXField = get(findobj('tag','edtFixationXField'), 'String');
+            config.saccadeType = get(findobj('tag','edtSaccadeType'), 'String');
+            config.saccadeStartXField = get(findobj('tag','edtSaccadeStartXField'), 'String');
+            config.saccadeEndXField = get(findobj('tag','edtSaccadeEndXField'), 'String');
+            
+            % Convert cell arrays to strings if necessary
+            fields = fieldnames(config);
+            for i = 1:length(fields)
+                if iscell(config.(fields{i})) && ~strcmp(fields{i}, 'txtFileList')
+                    config.(fields{i}) = config.(fields{i}){1};
+                end
+            end
+            
+        catch ME
+            errordlg(['Error collecting GUI settings: ' ME.message], 'Collection Error');
+            config = [];
+        end
+    end
+
+    function apply_config_to_gui(config)
+        % Apply loaded configuration to GUI controls
+        try
+            % Text file selection
+            if isfield(config, 'txtFileList') && ~isempty(config.txtFileList)
+                txtFileList = config.txtFileList;
+                set(findobj(gcf, 'tag','datasetList'), 'string', txtFileList, 'value', 1);
+            end
+            
+            % Apply all text field values
+            field_mapping = struct(...
+                'offset', 'edtOffset', ...
+                'pxPerChar', 'edtPxPerChar', ...
+                'numRegions', 'edtNumRegions', ...
+                'regionNames', 'edtRegionNames', ...
+                'conditionColName', 'edtCondName', ...
+                'itemColName', 'edtItemName', ...
+                'startCode', 'edtStartCode', ...
+                'endCode', 'edtEndCode', ...
+                'condTriggers', 'edtCondTriggers', ...
+                'itemTriggers', 'edtItemTriggers', ...
+                'fixationType', 'edtFixationType', ...
+                'fixationXField', 'edtFixationXField', ...
+                'saccadeType', 'edtSaccadeType', ...
+                'saccadeStartXField', 'edtSaccadeStartXField', ...
+                'saccadeEndXField', 'edtSaccadeEndXField');
+            
+            config_fields = fieldnames(field_mapping);
+            for i = 1:length(config_fields)
+                field_name = config_fields{i};
+                gui_tag = field_mapping.(field_name);
+                
+                if isfield(config, field_name)
+                    set(findobj('tag', gui_tag), 'String', config.(field_name));
+                end
+            end
+            
+        catch ME
+            errordlg(['Error applying configuration to GUI: ' ME.message], 'Apply Error');
+        end
+    end
+
+    function confirm_button(~,~)
+                % Check if we're in batch mode
+        batch_mode = false;
+        batchFilePaths = {};
+        batchFilenames = {};
+        outputDir = '';
+        
+        try
+            batch_mode = evalin('base', 'eyesort_batch_mode');
+            if batch_mode
+                batchFilePaths = evalin('base', 'eyesort_batch_file_paths');
+                batchFilenames = evalin('base', 'eyesort_batch_filenames');
+                outputDir = evalin('base', 'eyesort_batch_output_dir');
+                fprintf('Batch mode detected: Processing %d datasets\n', length(batchFilePaths));
+            end
+        catch
+            % Not in batch mode, continue with single dataset
+        end
+        
+        % Get current EEG from base workspace for single dataset mode
+        if ~batch_mode
+            try
+                EEG = evalin('base', 'EEG');
+            catch ME
+                errordlg('No EEG dataset loaded in EEGLAB.', 'Error');
+                return;
+            end
+        else
+            % Load first dataset as reference for validation
+            try
+                EEG = pop_loadset('filename', batchFilePaths{1});
+            catch ME
+                errordlg('Could not load first dataset for validation.', 'Error');
+                return;
+            end
         end
         
         % Gather parameters from GUI and ensure proper type conversion
@@ -296,15 +469,102 @@ function [EEG, com] = pop_load_text_ia(EEG)
 
         % Call the computational function with all parameters
         try
-            processedEEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
-                                      numRegions, regionNames, conditionColName, ...
-                                      itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
-                                      fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...
-                                      saccadeStartXFieldStr, saccadeEndXFieldStr);
+            if batch_mode
+                % Process all datasets in batch mode (one at a time for memory efficiency)
+                h = waitbar(0, 'Processing Text IA for all datasets...', 'Name', 'Batch Text IA Processing');
+                processed_count = 0;
+                failed_count = 0;
+                
+                for i = 1:length(batchFilePaths)
+                    waitbar(i/length(batchFilePaths), h, sprintf('Processing dataset %d of %d: %s', i, length(batchFilePaths), batchFilenames{i}));
+                    
+                    try
+                        % Load dataset
+                        currentEEG = pop_loadset('filename', batchFilePaths{i});
+                        
+                        % Process with Text IA
+                        processedEEG = compute_text_based_ia(currentEEG, txtFilePath, offset, pxPerChar, ...
+                                              numRegions, regionNames, conditionColName, ...
+                                              itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
+                                              fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...
+                                              saccadeStartXFieldStr, saccadeEndXFieldStr, 'batch_mode', true);
+                        
+                        % Save processed dataset (temporary file for next step)
+                        [~, fileName, ~] = fileparts(batchFilenames{i});
+                        
+                        % Create temporary directory for intermediate files
+                        temp_dir = fullfile(tempdir, 'eyesort_temp');
+                        if ~exist(temp_dir, 'dir')
+                            mkdir(temp_dir);
+                        end
+                        
+                        temp_output_path = fullfile(temp_dir, [fileName '_textia_temp.set']);
+                        pop_saveset(processedEEG, 'filename', temp_output_path, 'savemode', 'onefile');
+                        
+                        % Update the file path to point to processed version
+                        batchFilePaths{i} = temp_output_path;
+                        
+                        processed_count = processed_count + 1;
+                        fprintf('Successfully processed: %s\n', batchFilenames{i});
+                        
+                        % Clear from memory
+                        clear currentEEG processedEEG;
+                        
+                    catch ME
+                        warning('Failed to process dataset %s: %s', batchFilenames{i}, ME.message);
+                        failed_count = failed_count + 1;
+                    end
+                end
+                
+                delete(h);
+                
+                % Update batch file paths with processed versions
+                assignin('base', 'eyesort_batch_file_paths', batchFilePaths);
+                
+                % Load the first processed dataset for GUI display
+                try
+                    firstProcessedEEG = pop_loadset('filename', batchFilePaths{1});
+                    % Ensure EEG structure is properly formatted for EEGLAB
+                    if ~isfield(firstProcessedEEG, 'saved')
+                        firstProcessedEEG.saved = 'no';
+                    end
+                    assignin('base', 'EEG', firstProcessedEEG);
+                    processedEEG = firstProcessedEEG; % For the local variable
+                                    catch ME
+                        warning('EYESORT:LoadError', 'Could not load first processed dataset: %s', ME.message);
+                        processedEEG = EEG; % Use original
+                end
+                
+                msgbox(sprintf('Text IA processing complete!\n\nProcessed: %d datasets\nFailed: %d datasets\n\nNow proceed to step 3 (Filter Datasets) to apply filters.', processed_count, failed_count), 'Batch Processing Complete');
+                
+            else
+                % Single dataset processing
+                processedEEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
+                                          numRegions, regionNames, conditionColName, ...
+                                          itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
+                                          fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...
+                                          saccadeStartXFieldStr, saccadeEndXFieldStr);
+                
+                % Store processed data back to base workspace
+                % Ensure EEG structure is properly formatted for EEGLAB
+                if ~isfield(processedEEG, 'saved')
+                    processedEEG.saved = 'no';
+                end
+                assignin('base', 'EEG', processedEEG);
+                
+                % Note: Avoiding eeglab('redraw') to prevent GUI issues
+            end
             
-            % Store processed data back to base workspace
-            assignin('base', 'EEG', processedEEG);
-            EEG = processedEEG; % Keep a local copy for passing to filter GUI
+            % Auto-save current configuration for future use
+            try
+                config = collect_gui_settings();
+                if ~isempty(config)
+                    save_text_ia_config(config, 'last_text_ia_config.mat');
+                end
+            catch
+                % Don't fail the main process if auto-save fails
+                fprintf('Note: Could not auto-save configuration (this is not critical)\n');
+            end
 
             % Update command string for history
             com = sprintf('EEG = pop_loadTextIA(EEG); %% file=%s offset=%g px=%g',...
@@ -312,9 +572,6 @@ function [EEG, com] = pop_load_text_ia(EEG)
 
             % Close GUI
             close(gcf);
-            
-            % Redraw EEGLAB to reflect changes
-            eeglab('redraw');
             
         catch ME
             errordlg(['Error: ' ME.message], 'Error');

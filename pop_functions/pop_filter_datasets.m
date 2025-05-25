@@ -1,17 +1,39 @@
 function [EEG, com] = pop_filter_datasets(EEG)
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % FILTER DATASETS SUPERGUI    %
+    % FILTER DATASETS GUI         %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % Initialize output
     com = '';
     
+    % Check if we're in batch mode first
+    batch_mode = false;
+    batchFilePaths = {};
+    batchFilenames = {};
+    outputDir = '';
+    
+    try
+        batch_mode = evalin('base', 'eyesort_batch_mode');
+        if batch_mode
+            batchFilePaths = evalin('base', 'eyesort_batch_file_paths');
+            batchFilenames = evalin('base', 'eyesort_batch_filenames');
+            outputDir = evalin('base', 'eyesort_batch_output_dir');
+            fprintf('Batch mode detected: %d datasets ready for filtering\n', length(batchFilePaths));
+        end
+    catch
+        % Not in batch mode, continue with single dataset
+    end
+    
     % If no EEG input, try to get it from base workspace
     if nargin < 1
         try
-            EEG = evalin('base', 'EEG');
-            fprintf('Retrieved EEG from EEGLAB base workspace.\n');
+                    if batch_mode
+            EEG = pop_loadset('filename', batchFilePaths{1}); % Load first dataset as reference
+            else
+                EEG = evalin('base', 'EEG');
+                fprintf('Retrieved EEG from EEGLAB base workspace.\n');
+            end
         catch ME
             error('Failed to retrieve EEG dataset from base workspace: %s', ME.message);
         end
@@ -112,6 +134,41 @@ function [EEG, com] = pop_filter_datasets(EEG)
         fprintf('%d. %s\n', m, regionNames{m});
     end
     
+    % If in batch mode, offer batch processing option first
+    if batch_mode
+        choice = questdlg(sprintf(['Batch mode detected: %d datasets ready for filtering.\n\n'...
+                                  'How would you like to proceed?'], length(batchFilePaths)), ...
+                         'Batch Processing Available', ...
+                         'Process All Datasets', 'Configure Filters First', 'Cancel', 'Process All Datasets');
+        
+        if strcmp(choice, 'Cancel')
+            com = '';
+            return;
+        elseif strcmp(choice, 'Process All Datasets')
+            % Apply last saved filter configuration to all datasets
+            try
+                if check_last_filter_config()
+                    config = load_filter_config('last_filter_config.mat');
+                    [processed_count, com] = batch_apply_filters(batchFilePaths, batchFilenames, outputDir, config);
+                    
+                                                                    % Clean up temporary files
+                        cleanup_temp_files(batchFilePaths);
+                        
+                        % Clear batch mode after processing
+                        evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+                        
+                        msgbox(sprintf('Batch filtering complete!\n\n%d datasets processed and saved.', processed_count), 'Batch Complete');
+                    return;
+                else
+                    msgbox('No previous filter configuration found. Please configure filters first.', 'No Config Found', 'warn');
+                end
+            catch ME
+                errordlg(['Error in batch processing: ' ME.message], 'Batch Error');
+            end
+        end
+        % If "Configure Filters First" was selected, continue with normal GUI
+    end
+
     % Create the figure for the GUI
     hFig = figure('Name','Filter EEG Dataset',...
                   'NumberTitle','off',...
@@ -129,6 +186,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
     % Create parts of the layout for non-region sections
     geomhoriz = { ...
         [1 1 1 1], ...        % Filter Dataset Options title
+        1, ...                % Configuration management
+        [0.33 0.33 0.34], ... % Save config, Load config, Load last config buttons
         1, ...                % Time-Locked Region title
         1, ...                % Time-Locked Region description
     };
@@ -138,6 +197,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
         {}, ...
         {}, ...
         {}, ...
+        ...
+        {'Style','text','String','Configuration Management:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','pushbutton','String','Save Filter Config','callback', @save_filter_config_callback}, ...
+        {'Style','pushbutton','String','Load Filter Config','callback', @load_filter_config_callback}, ...
+        {'Style','pushbutton','String','Load Last Filter Config','callback', @load_last_filter_config_callback}, ...
         ...
         {'Style','text','String','Time-Locked Region Selection:', 'FontWeight', 'bold'}, ...
         ...
@@ -309,6 +374,38 @@ function [EEG, com] = pop_filter_datasets(EEG)
 
     % Callback for the Finish button
     function finish_filtering(~,~)
+        % Check if we're in batch mode and offer batch processing
+        if batch_mode
+            choice = questdlg(sprintf(['Apply current filter configuration to all %d datasets?'], length(batchFilePaths)), ...
+                             'Batch Processing', 'Yes', 'No', 'Yes');
+            
+            if strcmp(choice, 'Yes')
+                % Collect current filter configuration
+                filter_config = collect_filter_gui_settings();
+                if ~isempty(filter_config)
+                    try
+                        [processed_count, batch_com] = batch_apply_filters(batchFilePaths, batchFilenames, outputDir, filter_config);
+                        
+                        % Clean up temporary files
+                        cleanup_temp_files(batchFilePaths);
+                        
+                        % Clear batch mode after processing
+                        evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+                        
+                        com = batch_com;
+                        uiresume(gcf);
+                        close(gcf);
+                        
+                        msgbox(sprintf('Batch filtering complete!\n\n%d datasets processed and saved.', processed_count), 'Batch Complete');
+                        return;
+                    catch ME
+                        errordlg(['Error in batch processing: ' ME.message], 'Batch Error');
+                        return;
+                    end
+                end
+            end
+        end
+        
         % Apply the current filter if any and then signal completion
         % Check if any region is selected
         regionSelected = false;
@@ -336,6 +433,224 @@ function [EEG, com] = pop_filter_datasets(EEG)
         apply_filter_internal(false);
     end
 
+    % Save filter configuration callback
+    function save_filter_config_callback(~,~)
+        config = collect_filter_gui_settings();
+        if isempty(config)
+            return; % Error occurred in collection
+        end
+        
+        % Prompt user for filename
+        [filename, filepath] = uiputfile('*.mat', 'Save Filter Configuration', 'my_filter_config.mat');
+        if isequal(filename, 0)
+            return; % User cancelled
+        end
+        
+        full_filename = fullfile(filepath, filename);
+        
+        try
+            save_filter_config(config, full_filename);
+            msgbox(sprintf('Filter configuration saved successfully to:\n%s', full_filename), 'Save Complete', 'help');
+        catch ME
+            errordlg(['Error saving filter configuration: ' ME.message], 'Save Error');
+        end
+    end
+
+    % Load filter configuration callback
+    function load_filter_config_callback(~,~)
+        try
+            config = load_filter_config(); % Will show file dialog
+            if isempty(config)
+                return; % User cancelled
+            end
+            
+            apply_filter_config_to_gui(config);
+            msgbox('Filter configuration loaded successfully!', 'Load Complete', 'help');
+        catch ME
+            errordlg(['Error loading filter configuration: ' ME.message], 'Load Error');
+        end
+    end
+
+    % Load last filter configuration callback
+    function load_last_filter_config_callback(~,~)
+        try
+            if ~check_last_filter_config()
+                msgbox('No previous filter configuration found. Use "Save Filter Config" first to create a saved configuration.', 'No Previous Config', 'warn');
+                return;
+            end
+            
+            config = load_filter_config('last_filter_config.mat');
+            apply_filter_config_to_gui(config);
+            msgbox('Last filter configuration loaded successfully!', 'Load Complete', 'help');
+        catch ME
+            errordlg(['Error loading last filter configuration: ' ME.message], 'Load Error');
+        end
+    end
+
+    % Collect current filter GUI settings
+    function config = collect_filter_gui_settings()
+        config = struct();
+        
+        try
+            % Region selections
+            config.selectedRegions = {};
+            for ii = 1:length(regionCheckboxTags)
+                if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
+                    config.selectedRegions{end+1} = regionNames{ii};
+                end
+            end
+            
+            % Pass type selections
+            config.passFirstPass = get(findobj('tag','chkPass1'), 'Value');
+            config.passSecondPass = get(findobj('tag','chkPass2'), 'Value');
+            config.passThirdBeyond = get(findobj('tag','chkPass3'), 'Value');
+            
+            % Previous region selections
+            config.selectedPrevRegions = {};
+            for ii = 1:length(prevRegionCheckboxTags)
+                if get(findobj('tag', prevRegionCheckboxTags{ii}), 'Value') == 1
+                    config.selectedPrevRegions{end+1} = regionNames{ii};
+                end
+            end
+            
+            % Next region selections
+            config.selectedNextRegions = {};
+            for ii = 1:length(nextRegionCheckboxTags)
+                if get(findobj('tag', nextRegionCheckboxTags{ii}), 'Value') == 1
+                    config.selectedNextRegions{end+1} = regionNames{ii};
+                end
+            end
+            
+            % Fixation type selections
+            config.fixFirstInRegion = get(findobj('tag','chkFixType1'), 'Value');
+            config.fixSingleFixation = get(findobj('tag','chkFixType2'), 'Value');
+            config.fixSecondMultiple = get(findobj('tag','chkFixType3'), 'Value');
+            config.fixAllSubsequent = get(findobj('tag','chkFixType4'), 'Value');
+            config.fixLastInRegion = get(findobj('tag','chkFixType5'), 'Value');
+            
+            % Saccade direction selections
+            config.saccadeInForward = get(findobj('tag','chkSaccadeIn1'), 'Value');
+            config.saccadeInBackward = get(findobj('tag','chkSaccadeIn2'), 'Value');
+            config.saccadeOutForward = get(findobj('tag','chkSaccadeOut1'), 'Value');
+            config.saccadeOutBackward = get(findobj('tag','chkSaccadeOut2'), 'Value');
+            
+            % Store available regions for validation when loading
+            config.availableRegions = regionNames;
+            
+        catch ME
+            errordlg(['Error collecting filter GUI settings: ' ME.message], 'Collection Error');
+            config = [];
+        end
+    end
+
+    % Apply filter configuration to GUI
+    function apply_filter_config_to_gui(config)
+        try
+            % Validate that saved regions are compatible with current regions
+            if isfield(config, 'availableRegions')
+                saved_regions = config.availableRegions;
+                if ~isequal(sort(saved_regions), sort(regionNames))
+                    warning_msg = sprintf(['Warning: The saved configuration was created with different regions:\n\n'...
+                        'Saved regions: %s\n\n'...
+                        'Current regions: %s\n\n'...
+                        'Region-specific selections may not match exactly.'], ...
+                        strjoin(saved_regions, ', '), strjoin(regionNames, ', '));
+                    msgbox(warning_msg, 'Region Mismatch Warning', 'warn');
+                end
+            end
+            
+            % Clear all current selections first
+            % Region selections
+            for i = 1:length(regionCheckboxTags)
+                set(findobj('tag', regionCheckboxTags{i}), 'Value', 0);
+            end
+            for i = 1:length(prevRegionCheckboxTags)
+                set(findobj('tag', prevRegionCheckboxTags{i}), 'Value', 0);
+            end
+            for i = 1:length(nextRegionCheckboxTags)
+                set(findobj('tag', nextRegionCheckboxTags{i}), 'Value', 0);
+            end
+            
+            % Apply region selections
+            if isfield(config, 'selectedRegions')
+                for i = 1:length(config.selectedRegions)
+                    regionName = config.selectedRegions{i};
+                    regionIdx = find(strcmp(regionNames, regionName));
+                    if ~isempty(regionIdx)
+                        set(findobj('tag', regionCheckboxTags{regionIdx}), 'Value', 1);
+                    end
+                end
+            end
+            
+            % Apply pass type selections
+            if isfield(config, 'passFirstPass')
+                set(findobj('tag','chkPass1'), 'Value', config.passFirstPass);
+            end
+            if isfield(config, 'passSecondPass')
+                set(findobj('tag','chkPass2'), 'Value', config.passSecondPass);
+            end
+            if isfield(config, 'passThirdBeyond')
+                set(findobj('tag','chkPass3'), 'Value', config.passThirdBeyond);
+            end
+            
+            % Apply previous region selections
+            if isfield(config, 'selectedPrevRegions')
+                for i = 1:length(config.selectedPrevRegions)
+                    regionName = config.selectedPrevRegions{i};
+                    regionIdx = find(strcmp(regionNames, regionName));
+                    if ~isempty(regionIdx)
+                        set(findobj('tag', prevRegionCheckboxTags{regionIdx}), 'Value', 1);
+                    end
+                end
+            end
+            
+            % Apply next region selections
+            if isfield(config, 'selectedNextRegions')
+                for i = 1:length(config.selectedNextRegions)
+                    regionName = config.selectedNextRegions{i};
+                    regionIdx = find(strcmp(regionNames, regionName));
+                    if ~isempty(regionIdx)
+                        set(findobj('tag', nextRegionCheckboxTags{regionIdx}), 'Value', 1);
+                    end
+                end
+            end
+            
+            % Apply fixation type selections
+            if isfield(config, 'fixFirstInRegion')
+                set(findobj('tag','chkFixType1'), 'Value', config.fixFirstInRegion);
+            end
+            if isfield(config, 'fixSingleFixation')
+                set(findobj('tag','chkFixType2'), 'Value', config.fixSingleFixation);
+            end
+            if isfield(config, 'fixSecondMultiple')
+                set(findobj('tag','chkFixType3'), 'Value', config.fixSecondMultiple);
+            end
+            if isfield(config, 'fixAllSubsequent')
+                set(findobj('tag','chkFixType4'), 'Value', config.fixAllSubsequent);
+            end
+            if isfield(config, 'fixLastInRegion')
+                set(findobj('tag','chkFixType5'), 'Value', config.fixLastInRegion);
+            end
+            
+            % Apply saccade direction selections
+            if isfield(config, 'saccadeInForward')
+                set(findobj('tag','chkSaccadeIn1'), 'Value', config.saccadeInForward);
+            end
+            if isfield(config, 'saccadeInBackward')
+                set(findobj('tag','chkSaccadeIn2'), 'Value', config.saccadeInBackward);
+            end
+            if isfield(config, 'saccadeOutForward')
+                set(findobj('tag','chkSaccadeOut1'), 'Value', config.saccadeOutForward);
+            end
+            if isfield(config, 'saccadeOutBackward')
+                set(findobj('tag','chkSaccadeOut2'), 'Value', config.saccadeOutBackward);
+            end
+            
+        catch ME
+            errordlg(['Error applying filter configuration to GUI: ' ME.message], 'Apply Error');
+        end
+    end
+
     % Actual filter implementation - shared by both apply and finish buttons
     function apply_filter_internal(finishAfter)
         % Check if any region is selected
@@ -352,184 +667,47 @@ function [EEG, com] = pop_filter_datasets(EEG)
             return;
         end
         
-        % Get selected time-locked regions from checkboxes
-        selectedRegions = {};
-        for ii = 1:length(regionCheckboxTags)
-            if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
-                selectedRegions{end+1} = regionNames{ii};
-            end
+        % Collect filter configuration
+        filter_config = collect_filter_gui_settings();
+        if isempty(filter_config)
+            return; % Error occurred in collection
         end
-        
-        % Get checkbox states for pass type options
-        passFirstPass = get(findobj('tag','chkPass1'), 'Value');
-        passSecondPass = get(findobj('tag','chkPass2'), 'Value');
-        passThirdBeyond = get(findobj('tag','chkPass3'), 'Value');
-        
-        % Get selected previous regions from checkboxes
-        selectedPrevRegions = {};
-        for ii = 1:length(prevRegionCheckboxTags)
-            if get(findobj('tag', prevRegionCheckboxTags{ii}), 'Value') == 1
-                selectedPrevRegions{end+1} = regionNames{ii};
-            end
-        end
-        
-        % Get selected next regions from checkboxes
-        selectedNextRegions = {};
-        for ii = 1:length(nextRegionCheckboxTags)
-            if get(findobj('tag', nextRegionCheckboxTags{ii}), 'Value') == 1
-                selectedNextRegions{end+1} = regionNames{ii};
-            end
-        end
-        
-        % Get checkbox states for fixation type options
-        fixFirstInRegion = get(findobj('tag','chkFixType1'), 'Value');
-        fixSingleFixation = get(findobj('tag','chkFixType2'), 'Value');
-        fixSecondMultiple = get(findobj('tag','chkFixType3'), 'Value');
-        fixAllSubsequent = get(findobj('tag','chkFixType4'), 'Value');
-        fixLastInRegion = get(findobj('tag','chkFixType5'), 'Value');
-        
-        % Get checkbox states for saccade in direction options
-        saccadeInForward = get(findobj('tag','chkSaccadeIn1'), 'Value');
-        saccadeInBackward = get(findobj('tag','chkSaccadeIn2'), 'Value');
-        
-        % Get checkbox states for saccade out direction options
-        saccadeOutForward = get(findobj('tag','chkSaccadeOut1'), 'Value');
-        saccadeOutBackward = get(findobj('tag','chkSaccadeOut2'), 'Value');
-        
-        % Create arrays to hold selected options - preallocate maximum size
-        passOptions = zeros(1, 3);  % Max 3 options
-        passCount = 0;
-        if passFirstPass
-            passCount = passCount + 1;
-            passOptions(passCount) = 2; % First pass only
-        end
-        if passSecondPass
-            passCount = passCount + 1;
-            passOptions(passCount) = 3; % Second pass only
-        end
-        if passThirdBeyond
-            passCount = passCount + 1;
-            passOptions(passCount) = 4; % Third pass and beyond
-        end
-        if passCount == 0
-            passOptions = 1; % Any pass (default if none selected)
-        else
-            passOptions = passOptions(1:passCount); % Trim to actual size
-        end
-        
-        fixationOptions = zeros(1, 5);  % Max 5 options
-        fixCount = 0;
-        if fixFirstInRegion
-            fixCount = fixCount + 1;
-            fixationOptions(fixCount) = 2; % First in region
-        end
-        if fixSingleFixation
-            fixCount = fixCount + 1;
-            fixationOptions(fixCount) = 3; % Single fixation
-        end
-        if fixSecondMultiple
-            fixCount = fixCount + 1;
-            fixationOptions(fixCount) = 4; % Second of multiple
-        end
-        if fixAllSubsequent
-            fixCount = fixCount + 1;
-            fixationOptions(fixCount) = 5; % All subsequent fixations
-        end
-        if fixLastInRegion
-            fixCount = fixCount + 1;
-            fixationOptions(fixCount) = 6; % Last in region
-        end
-        if fixCount == 0
-            fixationOptions = 1; % Any fixation (default if none selected)
-        else
-            fixationOptions = fixationOptions(1:fixCount); % Trim to actual size
-        end
-        
-        saccadeInOptions = zeros(1, 2);  % Max 2 options
-        saccInCount = 0;
-        if saccadeInForward
-            saccInCount = saccInCount + 1;
-            saccadeInOptions(saccInCount) = 2; % Forward only
-        end
-        if saccadeInBackward
-            saccInCount = saccInCount + 1;
-            saccadeInOptions(saccInCount) = 3; % Backward only
-        end
-        if saccInCount == 0
-            saccadeInOptions = 1; % Any direction (default if none selected)
-        else
-            saccadeInOptions = saccadeInOptions(1:saccInCount);
-        end
-        
-        saccadeOutOptions = zeros(1, 2);  % Max 2 options
-        saccOutCount = 0;
-        if saccadeOutForward
-            saccOutCount = saccOutCount + 1;
-            saccadeOutOptions(saccOutCount) = 2; % Forward only
-        end
-        if saccadeOutBackward
-            saccOutCount = saccOutCount + 1;
-            saccadeOutOptions(saccOutCount) = 3; % Backward only
-        end
-        if saccOutCount == 0
-            saccadeOutOptions = 1; % Any direction (default if none selected)
-        else
-            saccadeOutOptions = saccadeOutOptions(1:saccOutCount);
-        end
-        
-        % Increment filter count and update EEG
-        EEG.eyesort_filter_count = EEG.eyesort_filter_count + 1;
-        currentFilterCount = EEG.eyesort_filter_count;
         
         try
-            filteredEEG = filter_dataset(EEG, conditionSet, itemSet, selectedRegions, ...
-                                         passOptions, selectedPrevRegions, selectedNextRegions, ...
-                                         fixationOptions, saccadeInOptions, saccadeOutOptions, currentFilterCount, ...
-                                         fixationType, fixationXField, saccadeType, ...
-                                         saccadeStartXField, saccadeEndXField);
-            filteredEEG.eyesort_filter_count = currentFilterCount;
-            if ~isfield(filteredEEG, 'eyesort_filter_descriptions')
-                filteredEEG.eyesort_filter_descriptions = {};
-            end
-            % Build filter description structure
-            filterDesc = struct();
-            filterDesc.filter_number = currentFilterCount;
-            filterDesc.filter_code = sprintf('%02d', currentFilterCount);
-            filterDesc.regions = selectedRegions;
-            filterDesc.pass_options = passOptions;
-            filterDesc.prev_regions = selectedPrevRegions;
-            filterDesc.next_regions = selectedNextRegions;
-            filterDesc.fixation_options = fixationOptions;
-            filterDesc.saccade_in_options = saccadeInOptions;
-            filterDesc.saccade_out_options = saccadeOutOptions;
-            filterDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
+            % Convert configuration to parameters for core function
+            filter_params = convert_config_to_params_gui(filter_config);
             
-            filteredEEG.eyesort_filter_descriptions{end+1} = filterDesc;
-            EEG = filteredEEG;  % Update the EEG variable directly
+            % Apply the filter using the core function
+            [filteredEEG, filter_com] = filter_datasets_core(EEG, filter_params{:});
             
-            % Ensure we're not causing structure mismatches
-            % (This is just a check, though the actual fix is in the batch script)
-            if ~isequal(fieldnames(EEG), fieldnames(filteredEEG))
-                fprintf('Warning: Field structure mismatch detected in filtered EEG. The batch script will handle this.\n');
+            % Update the EEG variable directly
+            EEG = filteredEEG;
+            
+            % Auto-save current filter configuration for future use
+            try
+                    save_filter_config(filter_config, 'last_filter_config.mat');
+            catch
+                % Don't fail the main process if auto-save fails
+                fprintf('Note: Could not auto-save filter configuration (this is not critical)\n');
             end
             
             assignin('base', 'EEG', filteredEEG);
-            com = sprintf('EEG = pop_filter_datasets(EEG); %% Applied filter #%d', currentFilterCount);
+            com = filter_com;
             
             % Display a message box with filter results
             if filteredEEG.eyesort_last_filter_matched_count > 0
-                msgStr = sprintf(['Filter #%d applied successfully!\n\n',...
+                msgStr = sprintf(['Filter applied successfully!\n\n',...
                                 'Identified %d events matching your filter criteria.\n\n',...
                                 'These events have been labeled with a 6-digit code: CCRRFF\n',...
-                                'Where: CC = condition code, RR = region code, FF = filter code (%02d)\n\n',...
+                                'Where: CC = condition code, RR = region code, FF = filter code\n\n',...
                                 '%s'],...
-                                currentFilterCount, filteredEEG.eyesort_last_filter_matched_count, currentFilterCount, ...
+                                filteredEEG.eyesort_last_filter_matched_count, ...
                                 iif(finishAfter, 'Filtering complete!', 'You can now apply another filter or click Finish when done.'));
                 
-                hMsg = msgbox(msgStr, sprintf('Filter #%d Applied', currentFilterCount), 'help');
+                hMsg = msgbox(msgStr, 'Filter Applied', 'help');
             else
                 % Special message for when no events were found
-                msgStr = sprintf(['WARNING: Filter #%d applied, but NO EVENTS matched your criteria!\n\n',...
+                msgStr = sprintf(['WARNING: Filter applied, but NO EVENTS matched your criteria!\n\n',...
                                 'This could be because:\n',...
                                 '1. The filter criteria are too restrictive\n',...
                                 '2. There is a mismatch between expected event fields and actual data\n',...
@@ -539,10 +717,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
                                 '- Checking for conflicts with existing filters\n',...
                                 '- Verifying your dataset contains the expected fields\n\n',...
                                 '%s'],...
-                                currentFilterCount, ...
                                 iif(finishAfter, 'Filtering complete!', 'You can modify your filter settings and try again.'));
                 
-                hMsg = msgbox(msgStr, sprintf('No Events Found - Filter #%d', currentFilterCount), 'warn');
+                hMsg = msgbox(msgStr, 'No Events Found', 'warn');
             end
             
             hBtn = findobj(hMsg, 'Type', 'UIControl', 'Style', 'pushbutton');
@@ -578,6 +755,103 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
     end
 
+    % Convert GUI configuration to parameters for core function
+    function filter_params = convert_config_to_params_gui(config)
+        filter_params = {};
+        
+        % Time-locked regions
+        if isfield(config, 'selectedRegions') && ~isempty(config.selectedRegions)
+            filter_params{end+1} = 'timeLockedRegions';
+            filter_params{end+1} = config.selectedRegions;
+        end
+        
+        % Pass options
+        passOptions = [];
+        if isfield(config, 'passFirstPass') && config.passFirstPass
+            passOptions(end+1) = 2;
+        end
+        if isfield(config, 'passSecondPass') && config.passSecondPass
+            passOptions(end+1) = 3;
+        end
+        if isfield(config, 'passThirdBeyond') && config.passThirdBeyond
+            passOptions(end+1) = 4;
+        end
+        if isempty(passOptions)
+            passOptions = 1;
+        end
+        filter_params{end+1} = 'passOptions';
+        filter_params{end+1} = passOptions;
+        
+        % Previous regions
+        if isfield(config, 'selectedPrevRegions') && ~isempty(config.selectedPrevRegions)
+            filter_params{end+1} = 'prevRegions';
+            filter_params{end+1} = config.selectedPrevRegions;
+        end
+        
+        % Next regions
+        if isfield(config, 'selectedNextRegions') && ~isempty(config.selectedNextRegions)
+            filter_params{end+1} = 'nextRegions';
+            filter_params{end+1} = config.selectedNextRegions;
+        end
+        
+        % Fixation options
+        fixationOptions = [];
+        if isfield(config, 'fixFirstInRegion') && config.fixFirstInRegion
+            fixationOptions(end+1) = 2;
+        end
+        if isfield(config, 'fixSingleFixation') && config.fixSingleFixation
+            fixationOptions(end+1) = 3;
+        end
+        if isfield(config, 'fixSecondMultiple') && config.fixSecondMultiple
+            fixationOptions(end+1) = 4;
+        end
+        if isfield(config, 'fixAllSubsequent') && config.fixAllSubsequent
+            fixationOptions(end+1) = 5;
+        end
+        if isfield(config, 'fixLastInRegion') && config.fixLastInRegion
+            fixationOptions(end+1) = 6;
+        end
+        if isempty(fixationOptions)
+            fixationOptions = 1;
+        end
+        filter_params{end+1} = 'fixationOptions';
+        filter_params{end+1} = fixationOptions;
+        
+        % Saccade in options
+        saccadeInOptions = [];
+        if isfield(config, 'saccadeInForward') && config.saccadeInForward
+            saccadeInOptions(end+1) = 2;
+        end
+        if isfield(config, 'saccadeInBackward') && config.saccadeInBackward
+            saccadeInOptions(end+1) = 3;
+        end
+        if isempty(saccadeInOptions)
+            saccadeInOptions = 1;
+        end
+        filter_params{end+1} = 'saccadeInOptions';
+        filter_params{end+1} = saccadeInOptions;
+        
+        % Saccade out options
+        saccadeOutOptions = [];
+        if isfield(config, 'saccadeOutForward') && config.saccadeOutForward
+            saccadeOutOptions(end+1) = 2;
+        end
+        if isfield(config, 'saccadeOutBackward') && config.saccadeOutBackward
+            saccadeOutOptions(end+1) = 3;
+        end
+        if isempty(saccadeOutOptions)
+            saccadeOutOptions = 1;
+        end
+        filter_params{end+1} = 'saccadeOutOptions';
+        filter_params{end+1} = saccadeOutOptions;
+        
+        % Add conditions and items
+        filter_params{end+1} = 'conditions';
+        filter_params{end+1} = conditionSet;
+        filter_params{end+1} = 'items';
+        filter_params{end+1} = itemSet;
+    end
+
     % Helper function to create an inline if statement (ternary operator)
     function result = iif(condition, trueVal, falseVal)
         if condition
@@ -587,493 +861,3 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
     end
 end
-
-function filteredEEG = filter_dataset(EEG, conditions, items, timeLockedRegions, ...
-                                     passOptions, prevRegions, nextRegions, ...
-                                     fixationOptions, saccadeInOptions, ...
-                                     saccadeOutOptions, filterCount, ...
-                                     fixationType, fixationXField, saccadeType, ...
-                                     saccadeStartXField, saccadeEndXField)
-    % Create a copy of the EEG structure
-    filteredEEG = EEG;
-    
-    % Create a tracking count for matched events (not for filtering, just for reporting)
-    matchedEventCount = 0;
-    
-    % Ensure filter count is at least 1 for 1-indexed filter codes
-    if filterCount < 1
-        filterCount = 1;
-    end
-    
-    % Pre-compute the filter code (always 2 digits, 01-99)
-    filterCode = sprintf('%02d', filterCount);
-    fprintf('Filter code for this batch: %s\n', filterCode);
-    
-    % Create region code mapping - map region names to 2-digit codes
-    regionCodeMap = containers.Map('KeyType', 'char', 'ValueType', 'char');
-    
-    % Get the unique region names from the EEG events
-    if isfield(EEG, 'region_names') && ~isempty(EEG.region_names)
-        % Use the regions stored in the EEG structure
-        regionList = EEG.region_names;
-        if ischar(regionList)
-            regionList = {regionList}; % Convert to cell array if it's a string
-        end
-    else
-        % Extract from events
-        regionList = unique({EEG.event.current_region});
-    end
-    
-    % Map each region to a 2-digit code
-    for kk = 1:length(regionList)
-        if ~isempty(regionList{kk}) && ischar(regionList{kk})
-            regionCodeMap(regionList{kk}) = sprintf('%02d', kk);
-        end
-    end
-    
-    % Print the region code mapping for verification
-    fprintf('\n============ REGION CODE MAPPING ============\n');
-    if ~isempty(regionCodeMap) && regionCodeMap.Count > 0
-        % Print in the original order the regions were added, not in the order keys() returns them
-        for kk = 1:length(regionList)
-            if ~isempty(regionList{kk}) && ischar(regionList{kk}) && isKey(regionCodeMap, regionList{kk})
-                fprintf('  Region "%s" = Code %s\n', regionList{kk}, regionCodeMap(regionList{kk}));
-            end
-        end
-    else
-        fprintf('  No regions found to map\n');
-    end
-    fprintf('=============================================\n\n');
-    
-    % Track events with conflicting codes
-    conflictingEvents = {};
-    
-    % Apply filtering criteria
-    for mm = 1:length(EEG.event)
-        evt = EEG.event(mm);
-        
-        % Check if this is a fixation event or a previously coded fixation event
-        % (for previously coded fixation events, the type will be a 6-digit code)
-        isFixation = false;
-        
-        % Check if this event is a fixation or was a fixation (now has a 6-digit code)
-        if ischar(evt.type) && startsWith(evt.type, fixationType)
-            isFixation = true;
-        elseif isfield(evt, 'original_type') && ischar(evt.original_type) && startsWith(evt.original_type, fixationType)
-            isFixation = true;
-        elseif ischar(evt.type) && length(evt.type) == 6 && isfield(evt, 'eyesort_full_code')
-            % This is likely a previously coded fixation event
-            isFixation = true;
-        end
-        
-        if ~isFixation
-            continue;
-        end
-        
-        % Check if event passes all filtering conditions
-        
-        % Check for condition and item - these are pre-defined filters from previous GUI
-        % We only include events that match the previously selected conditions and items
-        passesCondition = true;
-        if ~isempty(conditions) && isfield(evt, 'condition_number')
-            passesCondition = any(evt.condition_number == conditions);
-        end
-                          
-        passesItem = true;
-        if ~isempty(items) && isfield(evt, 'item_number')
-            passesItem = any(evt.item_number == items);
-        end
-        
-        % Skip to next event if it doesn't match condition/item criteria
-        if ~passesCondition || ~passesItem
-            continue;
-        end
-        
-        % Time-locked region filter (primary filter)
-        passesTimeLockedRegion = true;
-        if ~isempty(timeLockedRegions) && isfield(evt, 'current_region')
-            passesTimeLockedRegion = any(strcmp(evt.current_region, timeLockedRegions));
-        end
-        
-        % Skip to next event if it doesn't match time-locked region
-        if ~passesTimeLockedRegion
-            continue;
-        end
-        
-        % Pass index filtering - modified to handle multiple selection options
-        passesPassIndex = false;
-        
-        % Handle the case where passOptions is a single value (backward compatibility)
-        if isscalar(passOptions)
-            if passOptions == 1 % Any pass
-                passesPassIndex = true;
-            elseif passOptions == 2 && isfield(evt, 'is_first_pass_region') % First pass only
-                passesPassIndex = evt.is_first_pass_region;
-            elseif passOptions == 3 && isfield(evt, 'is_first_pass_region') % Not first pass
-                passesPassIndex = ~evt.is_first_pass_region;
-            else
-                passesPassIndex = true; % Default to true if no valid option or field
-            end
-        else
-            % Handle the case where passOptions is an array of multiple options
-            if isempty(passOptions) || any(passOptions == 1) % Any pass included
-                passesPassIndex = true;
-            else
-                % Check each option
-                for opt = passOptions
-                    if opt == 2 && isfield(evt, 'is_first_pass_region') && evt.is_first_pass_region
-                        passesPassIndex = true;
-                        break;
-                    elseif opt == 3 && isfield(evt, 'is_first_pass_region') && ~evt.is_first_pass_region
-                        passesPassIndex = true;
-                        break;
-                    end
-                end
-            end
-        end
-        
-        % Previous region filtering
-        passesPrevRegion = true;
-        if ~isempty(prevRegions)
-            passesPrevRegion = any(strcmp(evt.last_region_visited, prevRegions));
-        end
-        
-        % Next region filtering (requires looking ahead)
-        passesNextRegion = true;
-        if ~isempty(nextRegions)
-            % Look ahead to find the next fixation event in a different region
-            nextDifferentRegionFound = false;
-            currentRegion = evt.current_region;
-            
-            for jj = mm+1:length(EEG.event)
-                % Need to check both original fixation types and coded events
-                nextEvt = EEG.event(jj);
-                isNextFixation = false;
-                
-                if ischar(nextEvt.type) && startsWith(nextEvt.type, fixationType)
-                    isNextFixation = true;
-                elseif isfield(nextEvt, 'original_type') && ischar(nextEvt.original_type) && startsWith(nextEvt.original_type, fixationType)
-                    isNextFixation = true;
-                elseif ischar(nextEvt.type) && length(nextEvt.type) == 6 && isfield(nextEvt, 'eyesort_full_code')
-                    isNextFixation = true;
-                end
-                
-                if isNextFixation && isfield(nextEvt, 'current_region')
-                    % Only consider fixations in a different region than the current one
-                    if ~strcmp(nextEvt.current_region, currentRegion)
-                        nextDifferentRegionFound = true;
-                        passesNextRegion = any(strcmp(nextEvt.current_region, nextRegions));
-                        break; % Stop after finding the next fixation in a different region
-                    end
-                end
-            end
-            % If no next fixation in a different region was found, this can't pass the next region filter
-            if ~nextDifferentRegionFound
-                passesNextRegion = false;
-            end
-        end
-        
-        % Fixation type filtering - modified to handle multiple selection options
-        passesFixationType = false;
-        
-        % Handle the case where fixationOptions is a single value (backward compatibility)
-        if isscalar(fixationOptions)
-            if fixationOptions == 1 % Any fixation
-                passesFixationType = true;
-            elseif fixationOptions == 2 && isfield(evt, 'total_fixations_in_region') % First in region
-                passesFixationType = evt.total_fixations_in_region == 1;
-            elseif fixationOptions == 3 && isfield(evt, 'total_fixations_in_region') % Single fixation
-                passesFixationType = evt.total_fixations_in_region == 1 && ...
-                                    (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
-            elseif fixationOptions == 4 && isfield(evt, 'total_fixations_in_region') % Multiple fixations
-                passesFixationType = evt.total_fixations_in_region > 1;
-            elseif fixationOptions == 5 && isfield(evt, 'total_fixations_in_region') % Last in region
-                passesFixationType = evt.total_fixations_in_region == 1 && ...
-                                    (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
-            else
-                passesFixationType = true; % Default to true if no valid option or field
-            end
-        else
-            % Handle the case where fixationOptions is an array of multiple options
-            if isempty(fixationOptions) || any(fixationOptions == 1) % Any fixation included
-                passesFixationType = true;
-            else
-                % Check each option
-                for opt = fixationOptions
-                    if opt == 2 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1
-                        passesFixationType = true;
-                        break;
-                    elseif opt == 3 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
-                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
-                        passesFixationType = true;
-                        break;
-                    elseif opt == 4 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region > 1
-                        passesFixationType = true;
-                        break;
-                    elseif opt == 5 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
-                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
-                        passesFixationType = true;
-                        break;
-                    end
-                end
-            end
-        end
-        
-        % Saccade in direction filtering - modified to handle multiple selection options
-        passesSaccadeInDirection = false;
-        
-        % Handle the case where saccadeInOptions is a single value (backward compatibility)
-        if isscalar(saccadeInOptions)
-            if saccadeInOptions == 1 % Any direction
-                passesSaccadeInDirection = true;
-            else
-                % Find the saccade that led to this fixation
-                inSaccadeFound = false;
-                for jj = mm-1:-1:1
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        inSaccadeFound = true;
-                        % Calculate X-direction movement using saccade position data
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        
-                        % Check against filter options
-                        if saccadeInOptions == 2 % Forward only
-                            passesSaccadeInDirection = isForward && abs(xChange) > 10; % Threshold to ignore tiny movements
-                        elseif saccadeInOptions == 3 % Backward only
-                            passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
-                        elseif saccadeInOptions == 4 % Both
-                            passesSaccadeInDirection = abs(xChange) > 10;
-                        end
-                        break;
-                    end
-                end
-                if ~inSaccadeFound && saccadeInOptions < 4
-                    passesSaccadeInDirection = false;
-                end
-            end
-        else
-            % Handle the case where saccadeInOptions is an array of multiple options
-            if isempty(saccadeInOptions) || any(saccadeInOptions == 1) % Any direction included
-                passesSaccadeInDirection = true;
-            else
-                % Find the saccade that led to this fixation
-                inSaccadeFound = false;
-                xChange = 0;
-                isForward = false;
-                
-                for jj = mm-1:-1:1
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        inSaccadeFound = true;
-                        % Calculate X-direction movement using saccade position data
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        break;
-                    end
-                end
-                
-                if inSaccadeFound && abs(xChange) > 10
-                    % Check each option
-                    for opt = saccadeInOptions
-                        if opt == 2 && isForward % Forward only
-                            passesSaccadeInDirection = true;
-                            break;
-                        elseif opt == 3 && ~isForward % Backward only
-                            passesSaccadeInDirection = true;
-                            break;
-                        elseif opt == 4 % Both
-                            passesSaccadeInDirection = true;
-                            break;
-                        end
-                    end
-                end
-            end
-        end
-        
-        % Saccade out direction filtering - modified to handle multiple selection options
-        passesSaccadeOutDirection = false;
-        
-        % Handle the case where saccadeOutOptions is a single value (backward compatibility)
-        if isscalar(saccadeOutOptions)
-            if saccadeOutOptions == 1 % Any direction
-                passesSaccadeOutDirection = true;
-            else
-                % Look ahead to find the next saccade event
-                outSaccadeFound = false;
-                for jj = mm+1:length(EEG.event)
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        outSaccadeFound = true;
-                        % Calculate X-direction movement using saccade position data
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        
-                        % Check against filter options
-                        if saccadeOutOptions == 2 % Forward only
-                            passesSaccadeOutDirection = isForward && abs(xChange) > 10;
-                        elseif saccadeOutOptions == 3 % Backward only
-                            passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
-                        elseif saccadeOutOptions == 4 % Both
-                            passesSaccadeOutDirection = abs(xChange) > 10;
-                        end
-                        break;
-                    end
-                end
-                % If no next saccade was found and we're filtering for specific direction
-                if ~outSaccadeFound && saccadeOutOptions > 1 && saccadeOutOptions < 4
-                    passesSaccadeOutDirection = false;
-                end
-            end
-        else
-            % Handle the case where saccadeOutOptions is an array of multiple options
-            if isempty(saccadeOutOptions) || any(saccadeOutOptions == 1) % Any direction included
-                passesSaccadeOutDirection = true;
-            else
-                % Look ahead to find the next saccade event
-                outSaccadeFound = false;
-                xChange = 0;
-                isForward = false;
-                
-                for jj = mm+1:length(EEG.event)
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        outSaccadeFound = true;
-                        % Calculate X-direction movement using saccade position data
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        break;
-                    end
-                end
-                
-                if outSaccadeFound && abs(xChange) > 10
-                    % Check each option
-                    for opt = saccadeOutOptions
-                        if opt == 2 && isForward % Forward only
-                            passesSaccadeOutDirection = true;
-                            break;
-                        elseif opt == 3 && ~isForward % Backward only
-                            passesSaccadeOutDirection = true;
-                            break;
-                        elseif opt == 4 % Both
-                            passesSaccadeOutDirection = true;
-                            break;
-                        end
-                    end
-                end
-            end
-        end
-        
-        % Check if the event passes all filters
-        passes = passesPassIndex && passesPrevRegion && passesNextRegion && ...
-                 passesFixationType && passesSaccadeInDirection && passesSaccadeOutDirection;
-        
-        % If the event passes all filters, update its type code
-        if passes
-            matchedEventCount = matchedEventCount + 1;
-            
-            % Generate the 6-digit event code:
-            
-            % 1. First 2 digits: Last two digits of the condition number
-            condStr = '';
-            if isfield(evt, 'condition_number') && ~isempty(evt.condition_number)
-                condNum = evt.condition_number;
-                % Extract last two digits (or pad with zeros if needed)
-                condStr = sprintf('%02d', mod(condNum, 100));
-            else
-                condStr = '00'; % Default if no condition number
-            end
-            
-            % 2. Middle 2 digits: Region code
-            regionStr = '';
-            if isfield(evt, 'current_region') && ~isempty(evt.current_region) && isKey(regionCodeMap, evt.current_region)
-                regionStr = regionCodeMap(evt.current_region);
-            else
-                regionStr = '00'; % Default if no region
-            end
-            
-            % 3. Last 2 digits: Filter code (using the current filter count)
-            filterStr = filterCode;
-            
-            % Combine to create the 6-digit code
-            newType = sprintf('%s%s%s', condStr, regionStr, filterStr);
-            
-            % Store the original type if this is the first time we're coding this event
-            if ~isfield(evt, 'original_type')
-                filteredEEG.event(mm).original_type = evt.type;
-            end
-            
-            % Check for existing code in the event
-            if isfield(evt, 'eyesort_full_code') && ~isempty(evt.eyesort_full_code)
-                % If there's an existing code, add to conflicting events
-                conflictingEvents{end+1} = struct(...
-                    'event_index', mm, ...
-                    'existing_code', evt.eyesort_full_code, ...
-                    'new_code', newType, ...
-                    'condition', evt.condition_number, ...
-                    'region', evt.current_region);
-            end
-            
-            % Update the event type and related fields
-            filteredEEG.event(mm).type = newType;
-            filteredEEG.event(mm).eyesort_condition_code = condStr;
-            filteredEEG.event(mm).eyesort_region_code = regionStr;
-            filteredEEG.event(mm).eyesort_filter_code = filterStr;
-            filteredEEG.event(mm).eyesort_full_code = newType;
-        end
-    end
-    
-    % Handle conflicting events if any were found
-    if ~isempty(conflictingEvents)
-        % Calculate percentage of conflicting events
-        conflictPercentage = (length(conflictingEvents) / matchedEventCount) * 100;
-        
-        % Create a detailed message about the conflicts
-        msgStr = sprintf(['Warning: Found %d events with conflicting codes (%.1f%% of matched events).\n\n', ...
-                         'This means these events match multiple filter criteria.\n', ...
-                         'You have two options:\n\n', ...
-                         '1. Keep the new codes (recommended if you want to apply\n', ...
-                         '   these filters separately)\n', ...
-                         '2. Keep the existing codes\n\n', ...
-                         'Recommendation: Consider using a copy of the same EEG dataset and apply these filters separately in case you need to isolate these events and\n', ...
-                         'avoid conflicts. You can do this by:\n', ...
-                         '1. Clicking "Cancel" now\n', ...
-                         '2. Applying one filter to each of the respecting datasets\n', ...
-                         '3. Using the "Finish filtering" button after applying the filters separately on two identical datasets\n\n', ...
-                         'Would you like to keep the new codes?'], ...
-                         length(conflictingEvents), conflictPercentage);
-        
-        % Show the warning dialog
-        choice = questdlg(msgStr, 'Conflicting Event Codes', ...
-                         'Keep New Codes', 'Keep Existing Codes', 'Keep New Codes');
-        
-        if strcmp(choice, 'Keep Existing Codes')
-            % Restore the original codes for conflicting events
-            for i = 1:length(conflictingEvents)
-                idx = conflictingEvents{i}.event_index;
-                origCode = conflictingEvents{i}.existing_code;
-                filteredEEG.event(idx).type = origCode;
-                filteredEEG.event(idx).eyesort_full_code = origCode;
-                % Restore the individual components
-                filteredEEG.event(idx).eyesort_condition_code = origCode(1:2);
-                filteredEEG.event(idx).eyesort_region_code = origCode(3:4);
-                filteredEEG.event(idx).eyesort_filter_code = origCode(5:6);
-            end
-            % Update matched count to exclude restored events
-            matchedEventCount = matchedEventCount - length(conflictingEvents);
-        end
-    end
-    
-    % Store the number of matched events for reference
-    filteredEEG.eyesort_last_filter_matched_count = matchedEventCount;
-    
-    % Check if no events were found and show a warning
-    if matchedEventCount == 0
-        warndlg(['No events matched your filter criteria!\n\n'...
-                'This could be because:\n'...
-                '1. The filter criteria are too restrictive\n'...
-                '2. There is a mismatch between expected data structure and actual data\n'...
-                '3. The events that would match are already coded with a different filter\n\n'...
-                'Consider relaxing your criteria or checking for conflicts with existing filters.'], ...
-                'No Matching Events Found!', 'modal');
-    end
-    
-    % Return the filtered dataset with all events intact
-    return;
-end 

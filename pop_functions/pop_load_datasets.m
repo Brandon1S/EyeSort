@@ -70,7 +70,7 @@ function [EEG, com] = pop_load_datasets(EEG)
         ... Row 4:
         {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_dataset()}, ...
         {'Style', 'pushbutton', 'string', 'Clear All', 'callback', @(~,~) clear_all_datasets()}, ...
-        {}, {'Style', 'pushbutton', 'string', 'Confirm', 'callback', @(~,~) confirm_selection()}, ...
+        {}, {}, ...
         ... Row 5: Separator
         {'Style', 'text', 'string', '-- OR --', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ...
         ... Row 6: Directory selection option
@@ -91,7 +91,7 @@ function [EEG, com] = pop_load_datasets(EEG)
         {'Style', 'pushbutton', 'string', 'Cancel', 'callback', @(~,~) cancel_button()}, ...
         {}, ...
         {}, ...
-        {'Style', 'pushbutton', 'string', 'Process Batch', 'callback', @(~,~) process_batch()}, ...
+        {'Style', 'pushbutton', 'string', 'Confirm', 'callback', @(~,~) confirm_selection()}, ...
     };
     
      
@@ -217,7 +217,7 @@ function [EEG, com] = pop_load_datasets(EEG)
             CURRENTSET= 0;
         end
 
-        % DIRECTORY-BASED BATCH PROCESSING
+        % DIRECTORY-BASED BATCH LOADING
         if ~isempty(selectedDir)
             % Get all .set files in the directory
             fileList = dir(fullfile(selectedDir, '*.set'));
@@ -228,62 +228,99 @@ function [EEG, com] = pop_load_datasets(EEG)
             end
             
             % Create a progress bar
-            h = waitbar(0, 'Processing datasets...', 'Name', 'Batch Processing');
+            h = waitbar(0, 'Loading datasets for batch processing...', 'Name', 'Loading Datasets');
             
             try
-                % Process each dataset
+                batchFilePaths = {};
+                batchFileNames = {};
+                valid_count = 0;
+                
+                % Validate each dataset file (quick check without full loading)
                 for i = 1:length(fileList)
                     file_path = fullfile(selectedDir, fileList(i).name);
-                    waitbar(i/length(fileList), h, sprintf('Processing %d of %d: %s', i, length(fileList), fileList(i).name));
+                    waitbar(i/length(fileList), h, sprintf('Validating %d of %d: %s', i, length(fileList), fileList(i).name));
                     
                     try
-                        % Load dataset
-                        currentEEG = pop_loadset('filename', file_path);
-                        
-                        if isempty(currentEEG.data)
-                            warning('Dataset %s is empty. Skipping...', file_path);
-                            continue;
+                        % Quick validation - just check if file can be opened
+                        if exist(file_path, 'file')
+                            valid_count = valid_count + 1;
+                            batchFilePaths{valid_count} = file_path;
+                            batchFileNames{valid_count} = fileList(i).name;
+                            fprintf('Validated dataset %d/%d: %s\n', valid_count, length(fileList), fileList(i).name);
+                        else
+                            warning('File not found: %s', file_path);
                         end
                         
-                        % Process using text interest areas & trial labeling would happen in later steps
-                        % Just loading the datasets here
-                        
-                        % Save the processed dataset to the output directory
-                        [~, fileName, ~] = fileparts(fileList(i).name);
-                        output_path = fullfile(outputDir, [fileName '_processed.set']);
-                        
-                        % Save without dialogs - use only supported parameters
-                        pop_saveset(currentEEG, 'filename', output_path, 'savemode', 'onefile');
-                        
-                        fprintf('Processed dataset %d/%d: %s\n', i, length(fileList), fileList(i).name);
-                        
                     catch ME
-                        warning('Failed to process dataset %s:\n%s', file_path, ME.message);
+                        warning('Failed to validate dataset %s:\n%s', file_path, ME.message);
                     end
                 end
                 
                 % Close progress bar
                 delete(h);
                 
-                % For batch processing, we don't load anything into ALLEEG
-                % This avoids EEGLAB detecting changes in the event structure
-                
-                % Build command string for history
-                com = sprintf('EEG = pop_load_datasets(EEG); %% Batch processed %d datasets', length(fileList));
-                
-                % Success message
-                msgbox(sprintf('Batch processing complete! %d datasets processed and saved to output directory.\nNote: These files were not loaded into EEGLAB to avoid event structure conflicts.', length(fileList)), 'Success');
+                if valid_count > 0
+                    % Store only file paths and metadata (memory efficient!)
+                    assignin('base', 'eyesort_batch_file_paths', batchFilePaths);
+                    assignin('base', 'eyesort_batch_filenames', batchFileNames);
+                    assignin('base', 'eyesort_batch_output_dir', outputDir);
+                    assignin('base', 'eyesort_batch_mode', true);
+                    
+                    % Load only the first dataset for GUI display
+                    try
+                        firstEEG = pop_loadset('filename', batchFilePaths{1});
+                        % Ensure EEG structure is properly formatted for EEGLAB
+                        if ~isfield(firstEEG, 'saved')
+                            firstEEG.saved = 'no';
+                        end
+                        assignin('base', 'EEG', firstEEG);
+                        fprintf('Loaded first dataset for GUI display: %s\n', batchFileNames{1});
+                    catch ME
+                        warning('EYESORT:LoadError', 'Could not load first dataset for display: %s', ME.message);
+                        assignin('base', 'EEG', eeg_emptyset);
+                    end
+                    
+                    % Build command string for history
+                    com = sprintf('EEG = pop_load_datasets(EEG); %% Prepared %d datasets for batch processing', valid_count);
+                    
+                    % Calculate approximate memory usage
+                    if valid_count > 1
+                        est_memory_mb = valid_count * 200; % Rough estimate
+                        memory_warning = '';
+                        if est_memory_mb > 2000
+                            memory_warning = sprintf('\n\nNote: Processing %d large datasets will be done one-at-a-time\nto avoid memory issues (estimated ~%.1f GB total).', valid_count, est_memory_mb/1000);
+                        end
+                    else
+                        memory_warning = '';
+                    end
+                    
+                    % Success message
+                    msgbox(sprintf(['Successfully prepared %d datasets for batch processing!%s\n\n'...
+                                   'Next steps:\n'...
+                                   '1. Configure Text Interest Areas (step 2)\n'...
+                                   '2. Configure and Apply Filters (step 3)\n\n'...
+                                   'Each step will process datasets one-at-a-time for memory efficiency.'], valid_count, memory_warning), 'Batch Setup Complete');
+                else
+                    errordlg('No valid datasets were found.', 'Validation Failed');
+                end
                 
             catch ME
                 % Close progress bar if there was an error
                 if exist('h', 'var') && ishandle(h)
                     delete(h);
                 end
-                errordlg(['Error during batch processing: ' ME.message], 'Error');
+                errordlg(['Error during batch loading: ' ME.message], 'Error');
             end
             
         % INDIVIDUAL DATASETS PROCESSING
         else
+            % Clear any existing batch mode when loading individual datasets
+            try
+                evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+            catch
+                % Variables might not exist, which is fine
+            end
+            
             % Loop through selected datasets and load them
             for i = 1:numel(selected_datasets)
                 dataset_path = selected_datasets{i};
@@ -339,8 +376,7 @@ function [EEG, com] = pop_load_datasets(EEG)
             assignin('base', 'EEG', EEG);
             assignin('base', 'CURRENTSET', CURRENTSET);
 
-            % Refresh EEGLAB GUI
-            eeglab('redraw');
+            % Note: Avoiding eeglab('redraw') to prevent GUI issues
 
             % Build the command string for EEGLAB history
             com = 'EEG = pop_load_datasets(EEG);';

@@ -1,7 +1,7 @@
 function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, ...
                                               conditionColName, itemColName, startCode, endCode, conditionTriggers, itemTriggers, ...
-                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, varargin)
     %% COMPUTE_TEXT_BASED_IA - Computes text-based interest areas from a text file and integrates them with EEG data
     %
     % This function takes a text file containing reading stimuli organized by regions and maps
@@ -25,9 +25,16 @@ function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
     %   saccadeType       - Type identifier for saccade events
     %   saccadeStartXField- Field name containing saccade start X position
     %   saccadeEndXField  - Field name containing saccade end X position
+    %   varargin          - Optional parameters: 'batch_mode', true/false (default: false)
     %
     % OUTPUTS:
     %   EEG               - EEGLAB EEG structure with added interest area information
+    
+    % Parse optional parameters
+    p = inputParser;
+    addParameter(p, 'batch_mode', false, @islogical);
+    parse(p, varargin{:});
+    batch_mode = p.Results.batch_mode;
     
     % Handle multiple datasets case - process each one individually
     if numel(EEG) > 1
@@ -372,6 +379,17 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
 
     % Add a custom field to track processing status
     EEG.eyesort_processed = true;
+    
+    % Ensure EEG structure has required fields for EEGLAB compatibility
+    if ~isfield(EEG, 'saved')
+        EEG.saved = 'no';
+    end
+    if ~isfield(EEG, 'filename')
+        EEG.filename = '';
+    end
+    if ~isfield(EEG, 'filepath')
+        EEG.filepath = '';
+    end
     
     fprintf('\nProcessing complete! You can now filter the dataset using the Filter Datasets option in the EyeSort menu.\n');
 end
