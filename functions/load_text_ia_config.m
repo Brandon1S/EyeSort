@@ -14,6 +14,10 @@ function config = load_text_ia_config(filename)
             return; % User cancelled
         end
         filename = fullfile(fpath, fname);
+    elseif strcmp(filename, 'last_text_ia_config.mat')
+        % For last config, look in plugin root directory
+        plugin_dir = fileparts(fileparts(mfilename('fullpath')));
+        filename = fullfile(plugin_dir, filename);
     end
     
     try

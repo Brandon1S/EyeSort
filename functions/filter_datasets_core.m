@@ -2,12 +2,20 @@ function [filteredEEG, com] = filter_datasets_core(EEG, varargin)
 % FILTER_DATASETS_CORE - Core filtering function for EEG datasets
 %
 % Usage:
+%   Method 1 - Using config file:
+%   [filteredEEG, com] = filter_datasets_core(EEG, configFilePath)
+%   [filteredEEG, com] = filter_datasets_core(EEG, 'config_file', configFilePath)
+%
+%   Method 2 - Using individual parameters:
 %   [filteredEEG, com] = filter_datasets_core(EEG, 'param', value, ...)
 %
 % Required Input:
 %   EEG - EEGLAB dataset structure
 %
-% Optional Parameters (name-value pairs):
+% For config file method:
+%   configFilePath - Path to .m config file containing filter parameters
+%
+% For individual parameters method (name-value pairs):
 %   'timeLockedRegions'    - Cell array of region names to filter on
 %   'passOptions'          - Array of pass type options (1=any, 2=first, 3=second, 4=third+)
 %   'prevRegions'          - Cell array of previous region names
@@ -26,33 +34,111 @@ function [filteredEEG, com] = filter_datasets_core(EEG, varargin)
 % Initialize output
 com = '';
 
-% Parse input arguments
-p = inputParser;
-addRequired(p, 'EEG', @isstruct);
-addParameter(p, 'timeLockedRegions', {}, @iscell);
-addParameter(p, 'passOptions', 1, @isnumeric);
-addParameter(p, 'prevRegions', {}, @iscell);
-addParameter(p, 'nextRegions', {}, @iscell);
-addParameter(p, 'fixationOptions', 1, @isnumeric);
-addParameter(p, 'saccadeInOptions', 1, @isnumeric);
-addParameter(p, 'saccadeOutOptions', 1, @isnumeric);
-addParameter(p, 'conditions', [], @isnumeric);
-addParameter(p, 'items', [], @isnumeric);
-addParameter(p, 'filterCount', [], @isnumeric);
-
-parse(p, EEG, varargin{:});
-
-% Extract parsed parameters
-timeLockedRegions = p.Results.timeLockedRegions;
-passOptions = p.Results.passOptions;
-prevRegions = p.Results.prevRegions;
-nextRegions = p.Results.nextRegions;
-fixationOptions = p.Results.fixationOptions;
-saccadeInOptions = p.Results.saccadeInOptions;
-saccadeOutOptions = p.Results.saccadeOutOptions;
-conditions = p.Results.conditions;
-items = p.Results.items;
-filterCount = p.Results.filterCount;
+% Check if first argument is a config file
+if ~isempty(varargin) && ischar(varargin{1}) && (endsWith(varargin{1}, '.m') || endsWith(varargin{1}, '.mat')) && exist(varargin{1}, 'file')
+    % Config file method
+    config_file = varargin{1};
+    config = load_eyesort_config(config_file);
+    
+    % Extract parameters from config
+    timeLockedRegions = get_config_value(config, 'timeLockedRegions', []);
+    % Map GUI field name to expected parameter name
+    if isempty(timeLockedRegions)
+        timeLockedRegions = get_config_value(config, 'selectedRegions', []);
+    end
+    
+    % Check if filtering is enabled AFTER field mapping
+    if isempty(timeLockedRegions)
+        % No filtering requested
+        filteredEEG = EEG;
+        com = '';
+        fprintf('No time_locked_regions specified in config - skipping filtering\n');
+        return;
+    end
+    
+    passOptions = get_config_value(config, 'passOptions', 1);
+    % Map GUI pass fields to passOptions array
+    if isempty(passOptions) || passOptions == 1
+        passArray = [];
+        if get_config_value(config, 'passFirstPass', 0), passArray(end+1) = 2; end
+        if get_config_value(config, 'passSecondPass', 0), passArray(end+1) = 3; end
+        if get_config_value(config, 'passThirdBeyond', 0), passArray(end+1) = 4; end
+        if ~isempty(passArray), passOptions = passArray; end
+    end
+    
+    prevRegions = get_config_value(config, 'prevRegions', {});
+    if isempty(prevRegions)
+        prevRegions = get_config_value(config, 'selectedPrevRegions', {});
+    end
+    
+    nextRegions = get_config_value(config, 'nextRegions', {});
+    if isempty(nextRegions)
+        nextRegions = get_config_value(config, 'selectedNextRegions', {});
+    end
+    
+    fixationOptions = get_config_value(config, 'fixationOptions', 1);
+    % Map GUI fixation fields to fixationOptions array  
+    if isempty(fixationOptions) || fixationOptions == 1
+        fixArray = [];
+        if get_config_value(config, 'fixFirstInRegion', 0), fixArray(end+1) = 2; end
+        if get_config_value(config, 'fixSingleFixation', 0), fixArray(end+1) = 3; end
+        if get_config_value(config, 'fixSecondMulti', 0), fixArray(end+1) = 4; end
+        if get_config_value(config, 'fixAllSubsequent', 0), fixArray(end+1) = 5; end
+        if get_config_value(config, 'fixLastInRegion', 0), fixArray(end+1) = 6; end
+        if ~isempty(fixArray), fixationOptions = fixArray; end
+    end
+    
+    saccadeInOptions = get_config_value(config, 'saccadeInOptions', 1);
+    % Map GUI saccade in fields
+    if isempty(saccadeInOptions) || saccadeInOptions == 1
+        saccInArray = [];
+        if get_config_value(config, 'saccadeInForward', 0), saccInArray(end+1) = 2; end
+        if get_config_value(config, 'saccadeInBackward', 0), saccInArray(end+1) = 3; end
+        if ~isempty(saccInArray), saccadeInOptions = saccInArray; end
+    end
+    
+    saccadeOutOptions = get_config_value(config, 'saccadeOutOptions', 1);
+    % Map GUI saccade out fields  
+    if isempty(saccadeOutOptions) || saccadeOutOptions == 1
+        saccOutArray = [];
+        if get_config_value(config, 'saccadeOutForward', 0), saccOutArray(end+1) = 2; end
+        if get_config_value(config, 'saccadeOutBackward', 0), saccOutArray(end+1) = 3; end
+        if ~isempty(saccOutArray), saccadeOutOptions = saccOutArray; end
+    end
+    
+    conditions = get_config_value(config, 'conditions', []);
+    items = get_config_value(config, 'items', []);
+    filterCount = get_config_value(config, 'filterCount', []);
+    
+else
+    % Individual parameters method (original)
+    p = inputParser;
+    addRequired(p, 'EEG', @isstruct);
+    addParameter(p, 'timeLockedRegions', {}, @iscell);
+    addParameter(p, 'passOptions', 1, @isnumeric);
+    addParameter(p, 'prevRegions', {}, @iscell);
+    addParameter(p, 'nextRegions', {}, @iscell);
+    addParameter(p, 'fixationOptions', 1, @isnumeric);
+    addParameter(p, 'saccadeInOptions', 1, @isnumeric);
+    addParameter(p, 'saccadeOutOptions', 1, @isnumeric);
+    addParameter(p, 'conditions', [], @isnumeric);
+    addParameter(p, 'items', [], @isnumeric);
+    addParameter(p, 'filterCount', [], @isnumeric);
+    
+    parse(p, EEG, varargin{:});
+    
+    % Extract parsed parameters
+    timeLockedRegions = p.Results.timeLockedRegions;
+    passOptions = p.Results.passOptions;
+    prevRegions = p.Results.prevRegions;
+    nextRegions = p.Results.nextRegions;
+    fixationOptions = p.Results.fixationOptions;
+    saccadeInOptions = p.Results.saccadeInOptions;
+    saccadeOutOptions = p.Results.saccadeOutOptions;
+    conditions = p.Results.conditions;
+    items = p.Results.items;
+    filterCount = p.Results.filterCount;
+end
 
 % Validate input EEG structure
 if isempty(EEG)
@@ -586,4 +672,73 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
         fprintf('Filter applied successfully! Identified %d events matching filter criteria.\n', matchedEventCount);
     end
     
+end
+
+%% Helper function: load_eyesort_config
+function config = load_eyesort_config(configPath)
+    % LOAD_EYESORT_CONFIG - Load configuration from MATLAB script or MAT file
+    %
+    % INPUTS:
+    %   configPath - Path to .m config file or .mat file
+    %
+    % OUTPUTS:
+    %   config - Struct containing all variables from config file
+    
+    if ~exist(configPath, 'file')
+        error('Configuration file not found: %s', configPath);
+    end
+    
+    [~, ~, ext] = fileparts(configPath);
+    if strcmp(ext, '.mat')
+        % Load MAT file
+        try
+            loaded_data = load(configPath);
+            % Check if config is nested inside a 'config' field
+            if isfield(loaded_data, 'config')
+                config = loaded_data.config;
+            else
+                config = loaded_data;
+            end
+        catch ME
+            error('Error loading MAT config file %s: %s', configPath, ME.message);
+        end
+    elseif strcmp(ext, '.m')
+        % Run M file script
+        try
+            % Run the config file and capture variables
+            run(configPath);
+            
+            % Capture all variables from workspace
+            config = struct();
+            vars = whos;
+            for i = 1:length(vars)
+                if ~strcmp(vars(i).name, 'config') && ~strcmp(vars(i).name, 'configPath')
+                    config.(vars(i).name) = eval(vars(i).name);
+                end
+            end
+        catch ME
+            error('Error loading M config file %s: %s', configPath, ME.message);
+        end
+    else
+        error('Config file must be a .m or .mat file: %s', configPath);
+    end
+end
+
+%% Helper function: get_config_value
+function value = get_config_value(config, field_name, default_value)
+    % GET_CONFIG_VALUE - Get a value from config with default fallback
+    %
+    % INPUTS:
+    %   config - Config struct
+    %   field_name - Name of field to get
+    %   default_value - Default value if field doesn't exist
+    %
+    % OUTPUTS:
+    %   value - Field value or default
+    
+    if isfield(config, field_name) && ~isempty(config.(field_name))
+        value = config.(field_name);
+    else
+        value = default_value;
+    end
 end 

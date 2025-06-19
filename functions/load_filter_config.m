@@ -11,8 +11,27 @@ function config = load_filter_config(filename)
 %   config - Filter configuration structure
 
 if nargin < 1
-    config = filter_config_utils('load');
-else
-    config = filter_config_utils('load', filename);
+    [filename, filepath] = uigetfile('*.mat', 'Load Filter Configuration');
+    if isequal(filename, 0)
+        config = [];
+        return;
+    end
+    filename = fullfile(filepath, filename);
+elseif strcmp(filename, 'last_filter_config.mat')
+    % For last config, look in plugin root directory
+    plugin_dir = fileparts(fileparts(mfilename('fullpath')));
+    filename = fullfile(plugin_dir, filename);
+end
+
+try
+    loaded = load(filename);
+    if isfield(loaded, 'config')
+        config = loaded.config;
+        fprintf('Filter configuration loaded from: %s\n', filename);
+    else
+        error('Invalid configuration file format');
+    end
+catch ME
+    error('Failed to load filter configuration: %s', ME.message);
 end
 end 

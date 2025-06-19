@@ -1,9 +1,10 @@
 function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTriggers, ...
-                            fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
+                            fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
+                            sentenceStartCode, sentenceEndCode)
     
     % Verify inputs
-    if nargin < 10
-        error('trial_labeling: Not enough input arguments. All field names must be specified.');
+    if nargin < 12
+        error('trial_labeling: Not enough input arguments. All field names and sentence codes must be specified.');
     end
     
     % No default values - all field names are required
@@ -19,12 +20,14 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
     fprintf('Item triggers: %s\n', strjoin(itemTriggers, ', '));
     fprintf('Fixation event type: %s, X position field: %s\n', fixationType, fixationXField);
     fprintf('Saccade event type: %s, Start X field: %s, End X field: %s\n', saccadeType, saccadeStartXField, saccadeEndXField);
+    fprintf('Sentence start code: %s, Sentence end code: %s\n', sentenceStartCode, sentenceEndCode);
     
     % Initialize trial tracking variables
     % Trial tracking level
     currentTrial = 0;
     currentItem = [];
     currentCond = [];
+    sentenceActive = false;  % Track if we're in sentence presentation period
 
     % For tracking regression status and fixations in the Ending region:
     % inEndRegion is true once we enter the "Ending" region.
@@ -111,6 +114,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             lastRegionVisited = '';
             previousWord = '';
             previousRegion = '';
+            sentenceActive = false;  % Reset sentence state for new trial
             % Also, clear any ending region storage from previous trial:
             inEndRegion = false;
             endRegionFixations = [];
@@ -130,6 +134,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             % Reset trial-level item and condition numbers
             currentItem = [];
             currentCond = [];
+            sentenceActive = false;
         
         % Check for condition trigger
         elseif any(strcmp(eventTypeNoSpace, conditionTriggersNoSpace))
@@ -145,8 +150,16 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             fprintf('Setting item to %d from trigger %s\n', currentItem, eventType);
             EEG.event(iEvt).item_number = currentItem;
         
+        % Check for sentence start/end codes
+        elseif strcmp(eventTypeNoSpace, strrep(sentenceStartCode, ' ', ''))
+            sentenceActive = true;
+            fprintf('Sentence presentation started\n');
+        elseif strcmp(eventTypeNoSpace, strrep(sentenceEndCode, ' ', ''))
+            sentenceActive = false;
+            fprintf('Sentence presentation ended\n');
+        
         % Process fixation events
-        elseif startsWith(eventType, fixationType)
+        elseif startsWith(eventType, fixationType) && sentenceActive
             numFixations = numFixations + 1;
             fprintf('Processing fixation %d, current item: %d, current condition: %d\n', ...
                     numFixations, currentItem, currentCond);

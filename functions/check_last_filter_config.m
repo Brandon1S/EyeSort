@@ -7,5 +7,6 @@ function exists = check_last_filter_config()
 % Outputs:
 %   exists - True if 'last_filter_config.mat' exists, false otherwise
 
-exists = filter_config_utils('check_last');
+plugin_dir = fileparts(fileparts(mfilename('fullpath')));
+exists = exist(fullfile(plugin_dir, 'last_filter_config.mat'), 'file') == 2;
 end 

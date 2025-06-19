@@ -1,14 +1,24 @@
-function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
-                                              numRegions, regionNames, ...
-                                              conditionColName, itemColName, startCode, endCode, conditionTriggers, itemTriggers, ...
-                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, varargin)
+function EEG = compute_text_based_ia(EEG, varargin)
     %% COMPUTE_TEXT_BASED_IA - Computes text-based interest areas from a text file and integrates them with EEG data
     %
     % This function takes a text file containing reading stimuli organized by regions and maps
     % those regions onto EEG event data, allowing for region-based analysis of eye movement data.
     %
+    % USAGE:
+    %   Method 1 - Using config file:
+    %   EEG = compute_text_based_ia(EEG, 'config_file', 'path/to/config.m')
+    %   EEG = compute_text_based_ia(EEG, configFilePath)  % If first arg is .m file
+    %
+    %   Method 2 - Using individual parameters:
+    %   EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...)
+    %
     % INPUTS:
     %   EEG               - EEGLAB EEG structure or array of structures
+    %   
+    %   For config file method:
+    %   configFilePath    - Path to .m config file containing all parameters
+    %
+    %   For individual parameters method:
     %   txtFilePath       - Path to tab-delimited text file containing reading stimuli
     %   offset            - Pixel offset for the start of text (e.g., screen margin in pixels)
     %   pxPerChar         - Pixels per character (used to calculate region widths)
@@ -25,16 +35,107 @@ function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
     %   saccadeType       - Type identifier for saccade events
     %   saccadeStartXField- Field name containing saccade start X position
     %   saccadeEndXField  - Field name containing saccade end X position
-    %   varargin          - Optional parameters: 'batch_mode', true/false (default: false)
+    %
+    % OPTIONAL PARAMETERS:
+    %   'batch_mode'      - true/false (default: false)
     %
     % OUTPUTS:
     %   EEG               - EEGLAB EEG structure with added interest area information
     
-    % Parse optional parameters
-    p = inputParser;
-    addParameter(p, 'batch_mode', false, @islogical);
-    parse(p, varargin{:});
-    batch_mode = p.Results.batch_mode;
+    % Determine if first argument is a config file or individual parameters
+    if ~isempty(varargin)
+        % Check if first argument is a config file (.m or .mat)
+        if ischar(varargin{1}) && (endsWith(varargin{1}, '.m') || endsWith(varargin{1}, '.mat')) && exist(varargin{1}, 'file')
+            % Config file method
+            config_file = varargin{1};
+            config = load_eyesort_config(config_file);
+            
+            % Extract parameters from config
+            txtFilePath = config.txtFileList;
+            if iscell(txtFilePath)
+                txtFilePath = txtFilePath{1};
+            end
+            offset = str2double(config.offset);
+            pxPerChar = str2double(config.pxPerChar);
+            numRegions = str2double(config.numRegions);
+            regionNames = config.regionNames;
+            if ischar(regionNames)
+                regionNames = strsplit(regionNames, ',');
+                regionNames = strtrim(regionNames); % Remove whitespace
+            end
+            conditionColName = config.conditionColName;
+            itemColName = config.itemColName;
+            startCode = config.startCode;
+            endCode = config.endCode;
+            conditionTriggers = config.condTriggers;
+            itemTriggers = config.itemTriggers;
+            fixationType = config.fixationType;
+            fixationXField = config.fixationXField;
+            saccadeType = config.saccadeType;
+            saccadeStartXField = config.saccadeStartXField;
+            saccadeEndXField = config.saccadeEndXField;
+            sentenceStartCode = config.sentenceStartCode;
+            sentenceEndCode = config.sentenceEndCode;
+            
+            % Ensure trigger arrays are cell arrays - use helper only for complex ranges
+            if ~iscell(conditionTriggers)
+                conditionTriggers = expand_trigger_ranges(conditionTriggers);
+            end
+            if ~iscell(itemTriggers)
+                itemTriggers = expand_trigger_ranges(itemTriggers);
+            end
+            
+            % Ensure region names is a cell array
+            if ~iscell(regionNames)
+                if ischar(regionNames) || isstring(regionNames)
+                    regionNames = strsplit(string(regionNames), ',');
+                    regionNames = strtrim(regionNames);
+                    regionNames = cellstr(regionNames); % Convert to cell array of chars
+                end
+            end
+            
+            % Parse any remaining optional parameters
+            remaining_args = varargin(2:end);
+            p = inputParser;
+            addParameter(p, 'batch_mode', false, @islogical);
+            parse(p, remaining_args{:});
+            batch_mode = p.Results.batch_mode;
+            
+        else
+            % Individual parameters method (original)
+            if length(varargin) < 17
+                error('compute_text_based_ia: Not enough input arguments. Either provide a config file or all individual parameters.');
+            end
+            
+            txtFilePath = varargin{1};
+            offset = varargin{2};
+            pxPerChar = varargin{3};
+            numRegions = varargin{4};
+            regionNames = varargin{5};
+            conditionColName = varargin{6};
+            itemColName = varargin{7};
+            startCode = varargin{8};
+            endCode = varargin{9};
+            conditionTriggers = varargin{10};
+            itemTriggers = varargin{11};
+            fixationType = varargin{12};
+            fixationXField = varargin{13};
+            saccadeType = varargin{14};
+            saccadeStartXField = varargin{15};
+            saccadeEndXField = varargin{16};
+            sentenceStartCode = varargin{17};
+            sentenceEndCode = varargin{18};
+            
+            % Parse optional parameters
+            remaining_args = varargin(19:end);
+            p = inputParser;
+            addParameter(p, 'batch_mode', false, @islogical);
+            parse(p, remaining_args{:});
+            batch_mode = p.Results.batch_mode;
+        end
+    else
+        error('compute_text_based_ia: Either config file path or individual parameters must be provided.');
+    end
     
     % Handle multiple datasets case - process each one individually
     if numel(EEG) > 1
@@ -46,7 +147,8 @@ function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
             currentEEG = process_single_dataset(currentEEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
-                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
+                                              sentenceStartCode, sentenceEndCode);
             
             % Store back in the array - NO SAVING
             EEG(idx) = currentEEG;
@@ -59,13 +161,15 @@ function EEG = compute_text_based_ia(EEG, txtFilePath, offset, pxPerChar, ...
     EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
-                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
+                                              sentenceStartCode, sentenceEndCode);
 end
 
 function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
-                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField)
+                                              fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
+                                              sentenceStartCode, sentenceEndCode)
     %% PROCESS_SINGLE_DATASET - Core processing function for interest areas
     %
     % This function processes a single EEG dataset, performing the following steps:
@@ -77,8 +181,8 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     % 6. Stores metadata in the EEG structure for later use
     
     %% Step 1: Validate inputs and read the interest area text file
-    if nargin < 17
-        error('compute_text_based_ia_word_level: Not enough input arguments. Field names must be specified.');
+    if nargin < 19
+        error('compute_text_based_ia_word_level: Not enough input arguments. Field names and sentence codes must be specified.');
     end
     
     % No default values - all field names must be provided by the user
@@ -161,6 +265,11 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
 
     % Process each row (stimulus) in the text file
     fprintf('Processing %d rows of data...\n', height(data));
+    
+    % Add validation flag for space checking
+    spaceValidationPassed = true;
+    spaceValidationErrors = {};
+    
     for iRow = 1:height(data)
         try
             % Create a unique key based on condition and item numbers
@@ -171,6 +280,28 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
             regionBoundaries = zeros(numRegions, 2);  % [start, end] for each region
             wordBoundaries = containers.Map('KeyType', 'char', 'ValueType', 'any');
             regionWords = struct();
+            
+            % Validate region spacing before processing boundaries
+            for r = 1:numRegions
+                % Get the text for this region
+                regionText = data.(regionNames{r}){iRow};
+                if iscell(regionText)
+                    regionText = char(regionText);
+                end
+                
+                % Check space requirement: all regions except the first should start with a space
+                if r > 1 && ~isempty(regionText) && ~startsWith(regionText, ' ')
+                    spaceValidationPassed = false;
+                    errorMsg = sprintf('Row %d, Region %d (%s): Missing leading space. Text starts with "%s"', ...
+                                     iRow, r, regionNames{r}, regionText(1:min(10, length(regionText))));
+                    spaceValidationErrors{end+1} = errorMsg;
+                elseif r == 1 && ~isempty(regionText) && startsWith(regionText, ' ')
+                    spaceValidationPassed = false;
+                    errorMsg = sprintf('Row %d, Region %d (%s): First region should not start with a space. Text starts with space', ...
+                                     iRow, r, regionNames{r});
+                    spaceValidationErrors{end+1} = errorMsg;
+                end
+            end
             
             % Process each region in the stimulus
             for r = 1:numRegions
@@ -219,6 +350,42 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
             warning('Error processing row %d: %s', iRow, ME.message);
         end
     end
+    
+    % Check if space validation passed and report errors if any
+    if ~spaceValidationPassed
+        fprintf('\n=== REGION SPACING VALIDATION ERRORS ===\n');
+        fprintf('Found %d spacing errors in the interest area text file:\n\n', length(spaceValidationErrors));
+        for i = 1:length(spaceValidationErrors)
+            fprintf('%d. %s\n', i, spaceValidationErrors{i});
+        end
+        fprintf('\nREQUIREMENT: All regions except the first should start with a space.\n');
+        fprintf('The first region should NOT start with a space.\n');
+        fprintf('Please fix these spacing issues in your text file and try again.\n');
+        
+        % Create detailed error message for the error dialog
+        errorMsg = sprintf(['REGION SPACING VALIDATION ERRORS\n\n' ...
+                           'Found %d spacing errors in the interest area text file:\n\n'], ...
+                           length(spaceValidationErrors));
+        
+        % Add first few errors to the dialog (limit to avoid overly long dialogs)
+        maxErrorsToShow = min(5, length(spaceValidationErrors));
+        for i = 1:maxErrorsToShow
+            errorMsg = [errorMsg sprintf('%d. %s\n', i, spaceValidationErrors{i})];
+        end
+        
+        if length(spaceValidationErrors) > maxErrorsToShow
+            errorMsg = [errorMsg sprintf('\n... and %d more errors (see command window for full list)\n', ...
+                       length(spaceValidationErrors) - maxErrorsToShow)];
+        end
+        
+        errorMsg = [errorMsg sprintf(['\nREQUIREMENT:\n' ...
+                                     '• First region should NOT start with a space\n' ...
+                                     '• All other regions SHOULD start with a space\n\n' ...
+                                     'Please fix these spacing issues in your text file and try again.'])];
+        
+        error(errorMsg);
+    end
+    
     fprintf('Processed %d rows\n', height(data));
 
     %% Step 4: Assign region boundaries to EEG events
@@ -363,7 +530,8 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     % This calls trial_labeling function to identify first-pass reading, regressions, etc.
     fprintf('Performing trial labeling (identifying first-pass reading, regressions, etc.)...\n');
     EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTriggers, ...
-                             fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField);
+                             fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
+                             sentenceStartCode, sentenceEndCode);
 
     %% Step 6: Store metadata for use by other functions
     % Store field names in the EEG structure
@@ -440,4 +608,54 @@ function [bestMatch, found] = findBestColumnMatch(availableColumns, requestedCol
     % No match found
     bestMatch = requestedColumn;
     found = false;
+end
+
+%% Helper function: load_eyesort_config
+function config = load_eyesort_config(configPath)
+    % LOAD_EYESORT_CONFIG - Load configuration from MATLAB script or MAT file
+    %
+    % INPUTS:
+    %   configPath - Path to .m config file or .mat file
+    %
+    % OUTPUTS:
+    %   config - Struct containing all variables from config file
+    
+    if ~exist(configPath, 'file')
+        error('Configuration file not found: %s', configPath);
+    end
+    
+    [~, ~, ext] = fileparts(configPath);
+    if strcmp(ext, '.mat')
+        % Load MAT file
+        try
+            loaded_data = load(configPath);
+            % Check if config is nested inside a 'config' field
+            if isfield(loaded_data, 'config')
+                config = loaded_data.config;
+            else
+                config = loaded_data;
+            end
+        catch ME
+            error('Error loading MAT config file %s: %s', configPath, ME.message);
+        end
+    elseif strcmp(ext, '.m')
+        % Run M file script
+        try
+            % Run the config file and capture variables
+            run(configPath);
+            
+            % Capture all variables from workspace
+            config = struct();
+            vars = whos;
+            for i = 1:length(vars)
+                if ~strcmp(vars(i).name, 'config') && ~strcmp(vars(i).name, 'configPath')
+                    config.(vars(i).name) = eval(vars(i).name);
+                end
+            end
+        catch ME
+            error('Error loading M config file %s: %s', configPath, ME.message);
+        end
+    else
+        error('Config file must be a .m or .mat file: %s', configPath);
+    end
 end

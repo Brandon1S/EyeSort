@@ -22,11 +22,17 @@ function save_text_ia_config(config, filename)
     config.config_type = 'text_ia';
     
     try
-        save(filename, 'config');
-        fprintf('Text IA configuration saved to: %s\n', filename);
-        
-        % Also save as "last_text_ia_config.mat" for quick access
-        save('last_text_ia_config.mat', 'config');
+        % For last config, save only to plugin root directory
+        plugin_dir = fileparts(fileparts(mfilename('fullpath')));
+        if strcmp(filename, 'last_text_ia_config.mat')
+            save(fullfile(plugin_dir, filename), 'config');
+        else
+            save(filename, 'config');
+            fprintf('Text IA configuration saved to: %s\n', filename);
+            
+            % Also save as "last_text_ia_config.mat" for quick access in plugin root
+            save(fullfile(plugin_dir, 'last_text_ia_config.mat'), 'config');
+        end
         
         % Return success (filename is already displayed in fprintf)
         return;

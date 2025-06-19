@@ -1,7 +1,7 @@
 function [EEG, com] = pop_filter_datasets(EEG)
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % FILTER DATASETS GUI         %
+    %    FILTER DATASETS GUI      %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % Initialize output
@@ -13,6 +13,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
     batchFilenames = {};
     outputDir = '';
     
+    % Track current filter number for batch processing
+    persistent current_batch_filter_count;
+    if isempty(current_batch_filter_count)
+        current_batch_filter_count = 0;
+    end
+    
     try
         batch_mode = evalin('base', 'eyesort_batch_mode');
         if batch_mode
@@ -20,16 +26,23 @@ function [EEG, com] = pop_filter_datasets(EEG)
             batchFilenames = evalin('base', 'eyesort_batch_filenames');
             outputDir = evalin('base', 'eyesort_batch_output_dir');
             fprintf('Batch mode detected: %d datasets ready for filtering\n', length(batchFilePaths));
+            
+            % Reset filter count when starting new batch session
+            if current_batch_filter_count == 0
+                current_batch_filter_count = 0;
+            end
         end
     catch
         % Not in batch mode, continue with single dataset
+        current_batch_filter_count = 0;
     end
     
     % If no EEG input, try to get it from base workspace
     if nargin < 1
         try
-                    if batch_mode
+            if batch_mode
             EEG = pop_loadset('filename', batchFilePaths{1}); % Load first dataset as reference
+            
             else
                 EEG = evalin('base', 'EEG');
                 fprintf('Retrieved EEG from EEGLAB base workspace.\n');
@@ -64,12 +77,6 @@ function [EEG, com] = pop_filter_datasets(EEG)
         errordlg('EEG data does not contain field name information. Please process with the Text Interest Areas function first.', 'Error');
         return;
     end
-    
-    fixationType = EEG.eyesort_field_names.fixationType;
-    fixationXField = EEG.eyesort_field_names.fixationXField;
-    saccadeType = EEG.eyesort_field_names.saccadeType;
-    saccadeStartXField = EEG.eyesort_field_names.saccadeStartXField;
-    saccadeEndXField = EEG.eyesort_field_names.saccadeEndXField;
     
     % Extract available filtering options from EEG events
     conditionSet = [];
@@ -134,39 +141,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
         fprintf('%d. %s\n', m, regionNames{m});
     end
     
-    % If in batch mode, offer batch processing option first
+    % In batch mode, go directly to GUI - user can load last config if desired
     if batch_mode
-        choice = questdlg(sprintf(['Batch mode detected: %d datasets ready for filtering.\n\n'...
-                                  'How would you like to proceed?'], length(batchFilePaths)), ...
-                         'Batch Processing Available', ...
-                         'Process All Datasets', 'Configure Filters First', 'Cancel', 'Process All Datasets');
-        
-        if strcmp(choice, 'Cancel')
-            com = '';
-            return;
-        elseif strcmp(choice, 'Process All Datasets')
-            % Apply last saved filter configuration to all datasets
-            try
-                if check_last_filter_config()
-                    config = load_filter_config('last_filter_config.mat');
-                    [processed_count, com] = batch_apply_filters(batchFilePaths, batchFilenames, outputDir, config);
-                    
-                                                                    % Clean up temporary files
-                        cleanup_temp_files(batchFilePaths);
-                        
-                        % Clear batch mode after processing
-                        evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
-                        
-                        msgbox(sprintf('Batch filtering complete!\n\n%d datasets processed and saved.', processed_count), 'Batch Complete');
-                    return;
-                else
-                    msgbox('No previous filter configuration found. Please configure filters first.', 'No Config Found', 'warn');
-                end
-            catch ME
-                errordlg(['Error in batch processing: ' ME.message], 'Batch Error');
-            end
-        end
-        % If "Configure Filters First" was selected, continue with normal GUI
+        fprintf('Batch mode: %d datasets ready. Use "Load Last Filter Config" to reuse previous settings.\n', length(batchFilePaths));
     end
 
     % Create the figure for the GUI
@@ -376,34 +353,45 @@ function [EEG, com] = pop_filter_datasets(EEG)
     function finish_filtering(~,~)
         % Check if we're in batch mode and offer batch processing
         if batch_mode
-            choice = questdlg(sprintf(['Apply current filter configuration to all %d datasets?'], length(batchFilePaths)), ...
-                             'Batch Processing', 'Yes', 'No', 'Yes');
-            
-            if strcmp(choice, 'Yes')
-                % Collect current filter configuration
-                filter_config = collect_filter_gui_settings();
-                if ~isempty(filter_config)
-                    try
-                        [processed_count, batch_com] = batch_apply_filters(batchFilePaths, batchFilenames, outputDir, filter_config);
-                        
-                        % Clean up temporary files
-                        cleanup_temp_files(batchFilePaths);
-                        
-                        % Clear batch mode after processing
-                        evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
-                        
-                        com = batch_com;
-                        uiresume(gcf);
-                        close(gcf);
-                        
-                        msgbox(sprintf('Batch filtering complete!\n\n%d datasets processed and saved.', processed_count), 'Batch Complete');
-                        return;
-                    catch ME
-                        errordlg(['Error in batch processing: ' ME.message], 'Batch Error');
-                        return;
-                    end
+            % Check if any region is selected for the final filter
+            regionSelected = false;
+            for ii = 1:length(regionCheckboxTags)
+                if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
+                    regionSelected = true;
+                    break;
                 end
             end
+            
+            if regionSelected
+                % There's a final filter to apply
+                choice = questdlg(sprintf(['Apply final filter configuration to all %d datasets?'], length(batchFilePaths)), ...
+                                 'Final Filter', 'Yes', 'No', 'Yes');
+                
+                if strcmp(choice, 'Yes')
+                    % Apply the final filter to all datasets
+                    apply_filter_internal(true);
+                    return;
+                end
+            end
+            
+            % No final filter to apply, just finish
+            % Clean up temporary files
+            cleanup_temp_files(batchFilePaths);
+            
+            % Clear batch mode after processing
+            evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+            
+            com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtering completed with %d filters applied', current_batch_filter_count);
+            
+            % Show completion message with total events processed and WAIT for user acknowledgment
+            total_events_msg = sprintf('Batch filtering complete!\n\n%d datasets processed with %d filters applied.\n\nFinal filter processed events across all datasets.', processed_count, current_batch_filter_count);
+            h_msg = msgbox(total_events_msg, 'Batch Complete');
+            waitfor(h_msg); % Wait for user to close the message box
+            
+            current_batch_filter_count = 0; % Reset filter count AFTER showing message
+            uiresume(gcf);
+            close(gcf);
+            return;
         end
         
         % Apply the current filter if any and then signal completion
@@ -674,6 +662,44 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
         
         try
+            % Handle batch mode
+            if batch_mode
+                % Increment filter count for batch processing
+                current_batch_filter_count = current_batch_filter_count + 1;
+                
+                % Apply filter to all datasets in batch
+                [processed_count, batch_com] = batch_apply_filters_with_count(batchFilePaths, batchFilenames, outputDir, filter_config, current_batch_filter_count);
+                
+                if finishAfter
+                    % Clean up temporary files
+                    cleanup_temp_files(batchFilePaths);
+                    
+                    % Clear batch mode after processing
+                    evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+                    
+                    com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtering completed with %d filters applied', current_batch_filter_count);
+                    
+                    % Show completion message with total events processed and WAIT for user acknowledgment
+                    total_events_msg = sprintf('Batch filtering complete!\n\n%d datasets processed with %d filters applied.\n\nFinal filter processed events across all datasets.', processed_count, current_batch_filter_count);
+                    h_msg = msgbox(total_events_msg, 'Batch Complete');
+                    waitfor(h_msg); % Wait for user to close the message box
+                    
+                    current_batch_filter_count = 0; % Reset filter count AFTER showing message
+                    uiresume(gcf);
+                    close(gcf);
+                    return; % Add missing return to prevent further execution
+                    
+                else
+                    % Show progress message but keep GUI open
+                    msgbox(sprintf('Filter %02d applied to all %d datasets!\n\nYou can now configure and apply another filter.', current_batch_filter_count, processed_count), 'Batch Filter Applied', 'help');
+                    
+                    % Reset GUI for next filter
+                    reset_gui_for_next_filter();
+                end
+                return;
+            end
+            
+            % Single dataset mode - existing logic
             % Convert configuration to parameters for core function
             filter_params = convert_config_to_params_gui(filter_config);
             
@@ -734,24 +760,114 @@ function [EEG, com] = pop_filter_datasets(EEG)
                 uiresume(gcf);  % Resume execution to let uiwait finish
                 close(gcf);
             else
-                % Reset the time-locked region selection for the next filter
-                % but keep other settings
-                for i = 1:length(regionCheckboxTags)
-                    set(findobj('tag', regionCheckboxTags{i}), 'Value', 0);
-                end
-                
-                % Reset the previous region checkboxes
-                for i = 1:length(prevRegionCheckboxTags)
-                    set(findobj('tag', prevRegionCheckboxTags{i}), 'Value', 0);
-                end
-                
-                % Reset the next region checkboxes
-                for i = 1:length(nextRegionCheckboxTags)
-                    set(findobj('tag', nextRegionCheckboxTags{i}), 'Value', 0);
-                end
+                % Reset the GUI for next filter
+                reset_gui_for_next_filter();
             end
         catch ME
             errordlg(['Error applying filter: ' ME.message], 'Error');
+        end
+    end
+
+    % Helper function to reset GUI for next filter
+    function reset_gui_for_next_filter()
+        % Reset the time-locked region selection for the next filter
+        for i = 1:length(regionCheckboxTags)
+            set(findobj('tag', regionCheckboxTags{i}), 'Value', 0);
+        end
+        
+        % Reset the previous region checkboxes
+        for i = 1:length(prevRegionCheckboxTags)
+            set(findobj('tag', prevRegionCheckboxTags{i}), 'Value', 0);
+        end
+        
+        % Reset the next region checkboxes
+        for i = 1:length(nextRegionCheckboxTags)
+            set(findobj('tag', nextRegionCheckboxTags{i}), 'Value', 0);
+        end
+    end
+
+    % Batch apply filters with proper filter count tracking
+    function [processed_count, com] = batch_apply_filters_with_count(filePaths, fileNames, outputDir, config, filterNum)
+        processed_count = 0;
+        com = '';
+        
+        % Create a progress bar
+        h = waitbar(0, sprintf('Applying filter %02d to batch datasets...', filterNum), 'Name', 'Batch Processing');
+        
+        try
+            for i = 1:length(filePaths)
+                waitbar(i/length(filePaths), h, sprintf('Processing %d of %d: %s (Filter %02d)', i, length(filePaths), fileNames{i}, filterNum));
+                
+                try
+                    % Generate clean filename once at the start
+                    [~, fileName, ~] = fileparts(filePaths{i});
+                    % Remove common processing suffixes and temp indicators
+                    cleanFileName = regexprep(fileName, '(_temp|_textia|_processed|_filtered)+', '');
+                    cleanFileName = regexprep(cleanFileName, '_+', '_'); % Remove multiple underscores  
+                    cleanFileName = regexprep(cleanFileName, '^_|_$', ''); % Remove leading/trailing underscores
+                    
+                    % For first filter, load from original path
+                    % For subsequent filters, load from output directory (previously filtered version)
+                    if filterNum == 1
+                        tempEEG = pop_loadset('filename', filePaths{i});
+                    else
+                        % Load the previously filtered version using the same clean filename
+                        previous_file = fullfile(outputDir, [cleanFileName '_processed.set']);
+                        if exist(previous_file, 'file')
+                            tempEEG = pop_loadset('filename', previous_file);
+                        else
+                            warning('Previous filtered file not found: %s, using original', previous_file);
+                            tempEEG = pop_loadset('filename', filePaths{i});
+                        end
+                    end
+                    
+                    % CRITICAL: Reset filter count and ensure dataset integrity
+                    tempEEG.eyesort_filter_count = filterNum - 1; % Will be incremented by core function
+                    
+                    % Verify dataset has required fields for filtering
+                    if ~isfield(tempEEG, 'eyesort_field_names') || isempty(tempEEG.eyesort_field_names)
+                        warning('Dataset %s missing eyesort_field_names - may not be properly processed', cleanFileName);
+                        continue;
+                    end
+                    
+                    % Convert configuration to parameters
+                    filter_params = convert_config_to_params_gui(config);
+                    
+                    % Auto-save current filter configuration (only once, on first dataset)
+                    if i == 1
+                        try
+                            save_filter_config(config, 'last_filter_config.mat');
+                            fprintf('Auto-saved filter configuration to last_filter_config.mat\n');
+                        catch ME
+                            fprintf('Warning: Could not auto-save filter configuration: %s\n', ME.message);
+                        end
+                    end
+                    
+                    % Apply the filter
+                    [filteredEEG, ~] = filter_datasets_core(tempEEG, filter_params{:});
+                    
+                    % Save with consistent clean name
+                    output_path = fullfile(outputDir, [cleanFileName '_processed.set']);
+                    pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'onefile');
+                    
+                    processed_count = processed_count + 1;
+                    fprintf('Successfully processed dataset %d/%d: %s with filter %02d\n', processed_count, length(filePaths), cleanFileName, filterNum);
+                    
+                catch ME
+                    warning('Failed to process dataset %s: %s', filePaths{i}, ME.message);
+                end
+            end
+            
+            % Close progress bar
+            delete(h);
+            
+            com = sprintf('EEG = pop_filter_datasets(EEG); %% Applied filter %02d to %d datasets', filterNum, processed_count);
+            
+        catch ME
+            if exist('h', 'var') && ishandle(h)
+                delete(h);
+            end
+            error('Error in batch processing: %s', ME.message);
         end
     end
 
@@ -845,11 +961,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
         filter_params{end+1} = 'saccadeOutOptions';
         filter_params{end+1} = saccadeOutOptions;
         
-        % Add conditions and items
+        % Add conditions and items - these should be empty for batch processing
+        % to allow each dataset to determine its own conditions/items
         filter_params{end+1} = 'conditions';
-        filter_params{end+1} = conditionSet;
+        filter_params{end+1} = [];
         filter_params{end+1} = 'items';
-        filter_params{end+1} = itemSet;
+        filter_params{end+1} = [];
     end
 
     % Helper function to create an inline if statement (ternary operator)

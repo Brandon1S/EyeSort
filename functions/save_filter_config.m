@@ -11,5 +11,20 @@ function save_filter_config(config, filename)
 if nargin < 2
     filename = 'last_filter_config.mat';
 end
-filter_config_utils('save', config, filename);
+
+% For last_filter_config.mat, save to plugin root directory
+plugin_dir = fileparts(fileparts(mfilename('fullpath')));
+is_last_config = strcmp(filename, 'last_filter_config.mat');
+if is_last_config
+    filename = fullfile(plugin_dir, filename);
+end
+
+try
+    save(filename, 'config');
+    if ~is_last_config
+        fprintf('Filter configuration saved to: %s\n', filename);
+    end
+catch ME
+    error('Failed to save filter configuration: %s', ME.message);
+end
 end 
