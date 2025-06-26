@@ -23,22 +23,28 @@ function generate_bdf_file(varargin)
 
     % Check for input arguments
     if nargin < 1
-        % No inputs provided, retrieve from base workspace
+        % No inputs provided, try base workspace first
         try
-            EEG = evalin('base', 'EEG');
-            fprintf('Retrieved EEG from base workspace\n');
-        catch
+            % First try to get ALLEEG (preferred for multiple datasets)
             try
                 ALLEEG = evalin('base', 'ALLEEG');
-                fprintf('Retrieved ALLEEG from base workspace\n');
-                if ~isempty(ALLEEG)
-                    EEG = ALLEEG;
+                if ~isempty(ALLEEG) && length(ALLEEG) >= 1
+                    fprintf('Found ALLEEG with %d datasets in workspace\n', length(ALLEEG));
+                    EEG = ALLEEG; % Use ALLEEG as the dataset array
                 else
-                    error('Both EEG and ALLEEG are empty in base workspace');
+                    % Fall back to single EEG dataset
+                    EEG = evalin('base', 'EEG');
+                    fprintf('Found single EEG dataset in workspace\n');
                 end
             catch
-                error('Could not retrieve EEG or ALLEEG from base workspace');
+                % Fall back to single EEG dataset
+                EEG = evalin('base', 'EEG');
+                fprintf('Found single EEG dataset in workspace\n');
             end
+            
+
+        catch
+            error('Could not retrieve datasets from base workspace');
         end
     else
         % Use the provided input
@@ -83,6 +89,11 @@ function generate_bdf_file(varargin)
     uniqueCodes = unique(allCodes);
     fprintf('Found %d unique filter codes.\n', length(uniqueCodes));
     
+    % Check if we have any filtered events
+    if isempty(uniqueCodes)
+        error('No filtered events found. Please run filtering first.');
+    end
+    
     % Create a structure to organize filters by condition and region
     codeMap = organize_filter_codes(uniqueCodes);
     
@@ -101,10 +112,12 @@ function filteredCodes = extract_filtered_codes(EEG)
     end
     
     for i = 1:length(EEG.event)
-        % Check for 6-digit type string (filtered events)
-        if isfield(EEG.event(i), 'type') && ischar(EEG.event(i).type)
+        % Check for eyesort_full_code field (preferred method)
+        if isfield(EEG.event(i), 'eyesort_full_code') && ~isempty(EEG.event(i).eyesort_full_code)
+            filteredCodes{end+1} = EEG.event(i).eyesort_full_code;
+        % Also check for 6-digit type string (fallback method)
+        elseif isfield(EEG.event(i), 'type') && ischar(EEG.event(i).type)
             eventType = EEG.event(i).type;
-            
             % Check if this is a 6-digit code created by the filter process
             if length(eventType) == 6 && all(isstrprop(eventType, 'digit'))
                 filteredCodes{end+1} = eventType;
@@ -170,23 +183,50 @@ function write_bdf_file(codeMap, outputFile)
     regionNameMap('03') = 'Target_word';
     regionNameMap('04') = 'Ending';
     
-    % Get filter descriptions from EEG structure if available
+    % Get filter descriptions from EEG/ALLEEG structure if available
     try
-        EEG = evalin('base', 'EEG');
-        hasFilterDescriptions = isfield(EEG, 'eyesort_filter_descriptions') && ~isempty(EEG.eyesort_filter_descriptions);
-        if hasFilterDescriptions
-            filterDescriptions = EEG.eyesort_filter_descriptions;
-            fprintf('Found %d filter descriptions in EEG structure, will include in BDF file.\n', length(filterDescriptions));
-            
-            % Debug: Print filter descriptions to help diagnose matching issues
-            for i = 1:length(filterDescriptions)
-                desc = filterDescriptions{i};
-                fprintf('Filter #%d: Code=%s, Number=%d\n', i, desc.filter_code, desc.filter_number);
+        filterDescriptions = [];
+        
+        % Try ALLEEG first, then fall back to EEG
+        try
+            ALLEEG_workspace = evalin('base', 'ALLEEG');
+            if ~isempty(ALLEEG_workspace) && length(ALLEEG_workspace) >= 1
+                % Check first dataset in ALLEEG for filter descriptions
+                if isfield(ALLEEG_workspace(1), 'eyesort_filter_descriptions') && ~isempty(ALLEEG_workspace(1).eyesort_filter_descriptions)
+                    filterDescriptions = ALLEEG_workspace(1).eyesort_filter_descriptions;
+                    fprintf('Found %d filter descriptions in ALLEEG, will include in BDF file.\n', length(filterDescriptions));
+                else
+                    fprintf('No filter descriptions found in ALLEEG datasets.\n');
+                end
             end
-        else
-            filterDescriptions = [];
-            fprintf('No filter descriptions found in EEG structure.\n');
+        catch
+            % Fall back to EEG workspace variable
+            try
+                EEG_workspace = evalin('base', 'EEG');
+                % Handle both single dataset and array of datasets
+                if length(EEG_workspace) > 1
+                    % Multiple datasets - check the first one for filter descriptions
+                    if isfield(EEG_workspace(1), 'eyesort_filter_descriptions') && ~isempty(EEG_workspace(1).eyesort_filter_descriptions)
+                        filterDescriptions = EEG_workspace(1).eyesort_filter_descriptions;
+                        fprintf('Found %d filter descriptions in first EEG dataset, will include in BDF file.\n', length(filterDescriptions));
+                    else
+                        fprintf('No filter descriptions found in EEG datasets.\n');
+                    end
+                else
+                    % Single dataset
+                    if isfield(EEG_workspace, 'eyesort_filter_descriptions') && ~isempty(EEG_workspace.eyesort_filter_descriptions)
+                        filterDescriptions = EEG_workspace.eyesort_filter_descriptions;
+                        fprintf('Found %d filter descriptions in EEG structure, will include in BDF file.\n', length(filterDescriptions));
+                    else
+                        fprintf('No filter descriptions found in EEG structure.\n');
+                    end
+                end
+            catch
+                fprintf('No filter descriptions found in workspace.\n');
+            end
         end
+        
+
     catch ME
         fprintf('Error retrieving filter descriptions: %s\n', ME.message);
         filterDescriptions = [];
@@ -221,11 +261,8 @@ function write_bdf_file(codeMap, outputFile)
                 currentCode = filterCodes{f};
                 filterCode = currentCode(5:6); % Last 2 digits are the filter code
                 
-                % Debug: Show what we're looking for
-                fprintf('Looking for filter code %s in %d descriptions\n', filterCode, length(filterDescriptions));
-                
-                % Create base descriptive bin name
-                baseDescription = sprintf('Condition %s, %s', condCode, regionName);
+                % Create base descriptive bin name (just condition, let user description handle the rest)
+                baseDescription = sprintf('Condition %s', condCode);
                 
                 % Try to find detailed filter description
                 detailedDescription = '';
@@ -352,6 +389,47 @@ function write_bdf_file(codeMap, outputFile)
                 if isempty(detailedDescription)
                     detailedDescription = baseDescription;
                     detailedDescription = [detailedDescription, sprintf(', Filter: %s', filterCode)];
+                end
+                
+                % Try to enhance description with BDF condition and filter description fields
+                try
+                    % Find events with this code to get BDF description information
+                    % Get datasets from workspace since EEG variable is not in scope here
+                    try
+                        ALLEEG_workspace = evalin('base', 'ALLEEG');
+                        if ~isempty(ALLEEG_workspace) && length(ALLEEG_workspace) > 1
+                            allEvents = [ALLEEG_workspace.event];
+                        else
+                            EEG_workspace = evalin('base', 'EEG');
+                            if length(EEG_workspace) > 1
+                                allEvents = [EEG_workspace.event];
+                            else
+                                allEvents = EEG_workspace.event;
+                            end
+                        end
+                    catch
+                        % If we can't get datasets from workspace, skip BDF enhancement
+                        continue;
+                    end
+                    
+                    % Look for events with this filter code that have BDF description fields
+                    for i = 1:length(allEvents)
+                        evt = allEvents(i);
+                        if isfield(evt, 'eyesort_full_code') && strcmp(evt.eyesort_full_code, currentCode)
+                            % Check if we have BDF description fields directly
+                            if isfield(evt, 'bdf_full_description') && ~isempty(evt.bdf_full_description)
+                                detailedDescription = evt.bdf_full_description;
+                                break;
+                            elseif isfield(evt, 'bdf_filter_description') && ~isempty(evt.bdf_filter_description)
+                                % Just use the user's filter description directly
+                                detailedDescription = [baseDescription, ' - ', evt.bdf_filter_description];
+                                break;
+                            end
+                        end
+                    end
+                catch ME
+                    % If there's an error accessing BDF fields, continue with existing description
+                    fprintf('Note: Could not access BDF description fields: %s\n', ME.message);
                 end
                 
                 % Write bin in BINLISTER format with the detailed description

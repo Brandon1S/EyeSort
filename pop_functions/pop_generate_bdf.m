@@ -136,28 +136,19 @@ function [EEG, com] = pop_generate_bdf(EEG)
     
     function generateCallback(~, ~)
         try
-            % Ask for output file location
-            [fileName, filePath] = uiputfile({'*.txt', 'Text Files (*.txt)'; '*.*', 'All Files'}, ...
-                'Save BDF File', 'eyesort_bins.txt');
-            
-            if fileName == 0
-                % User cancelled
-                return;
-            end
-            
-            outputFile = fullfile(filePath, fileName);
-            
-            % Close the dialog
+            % Close the dialog first
             close(hFig);
             
-            % Generate BDF file
-            generate_bdf_file(EEG, outputFile);
+            % Generate BDF file - let it auto-detect datasets from workspace
+            % This allows it to find ALLEEG if available, or fall back to EEG
+            % The function will handle its own file dialog
+            generate_bdf_file();
             
             % Create command string for history
             com = sprintf('EEG = pop_generate_bdf(EEG);');
             
             % Show success message
-            msgbox(sprintf('BDF file created successfully at:\n%s', outputFile), 'Success');
+            msgbox('BDF file created successfully!', 'Success');
             
         catch ME
             % Error handling

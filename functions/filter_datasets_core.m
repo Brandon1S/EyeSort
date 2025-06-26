@@ -124,6 +124,7 @@ else
     addParameter(p, 'conditions', [], @isnumeric);
     addParameter(p, 'items', [], @isnumeric);
     addParameter(p, 'filterCount', [], @isnumeric);
+    addParameter(p, 'filterDescription', '', @ischar);
     
     parse(p, EEG, varargin{:});
     
@@ -138,6 +139,7 @@ else
     conditions = p.Results.conditions;
     items = p.Results.items;
     filterCount = p.Results.filterCount;
+    filterDescription = p.Results.filterDescription;
 end
 
 % Validate input EEG structure
@@ -214,7 +216,7 @@ try
                                          passOptions, prevRegions, nextRegions, ...
                                          fixationOptions, saccadeInOptions, saccadeOutOptions, filterCount, ...
                                          fixationType, fixationXField, saccadeType, ...
-                                         saccadeStartXField, saccadeEndXField);
+                                         saccadeStartXField, saccadeEndXField, filterDescription);
     
     % Update filter count and descriptions
     filteredEEG.eyesort_filter_count = filterCount;
@@ -267,7 +269,7 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                                               fixationOptions, saccadeInOptions, ...
                                               saccadeOutOptions, filterCount, ...
                                               fixationType, fixationXField, saccadeType, ...
-                                              saccadeStartXField, saccadeEndXField)
+                                              saccadeStartXField, saccadeEndXField, filterDescription)
     % Internal filtering implementation
     
     % Create a copy of the EEG structure
@@ -377,10 +379,12 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
         if isscalar(passOptions)
             if passOptions == 1
                 passesPassIndex = true;
-            elseif passOptions == 2 && isfield(evt, 'is_first_pass_region')
-                passesPassIndex = evt.is_first_pass_region;
-            elseif passOptions == 3 && isfield(evt, 'is_first_pass_region')
-                passesPassIndex = ~evt.is_first_pass_region;
+            elseif passOptions == 2 && isfield(evt, 'region_pass_number')
+                passesPassIndex = (evt.region_pass_number == 1);
+            elseif passOptions == 3 && isfield(evt, 'region_pass_number')
+                passesPassIndex = (evt.region_pass_number == 2);
+            elseif passOptions == 4 && isfield(evt, 'region_pass_number')
+                passesPassIndex = (evt.region_pass_number >= 3);
             else
                 passesPassIndex = true;
             end
@@ -389,10 +393,13 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                 passesPassIndex = true;
             else
                 for opt = passOptions
-                    if opt == 2 && isfield(evt, 'is_first_pass_region') && evt.is_first_pass_region
+                    if opt == 2 && isfield(evt, 'region_pass_number') && evt.region_pass_number == 1
                         passesPassIndex = true;
                         break;
-                    elseif opt == 3 && isfield(evt, 'is_first_pass_region') && ~evt.is_first_pass_region
+                    elseif opt == 3 && isfield(evt, 'region_pass_number') && evt.region_pass_number == 2
+                        passesPassIndex = true;
+                        break;
+                    elseif opt == 4 && isfield(evt, 'region_pass_number') && evt.region_pass_number >= 3
                         passesPassIndex = true;
                         break;
                     end
@@ -440,40 +447,79 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
         % Fixation type filtering
         passesFixationType = false;
         if isscalar(fixationOptions)
-            if fixationOptions == 1
+            if fixationOptions == 0
                 passesFixationType = true;
-            elseif fixationOptions == 2 && isfield(evt, 'total_fixations_in_region')
-                passesFixationType = evt.total_fixations_in_region == 1;
-            elseif fixationOptions == 3 && isfield(evt, 'total_fixations_in_region')
-                passesFixationType = evt.total_fixations_in_region == 1 && ...
-                                    (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
-            elseif fixationOptions == 4 && isfield(evt, 'total_fixations_in_region')
-                passesFixationType = evt.total_fixations_in_region > 1;
-            elseif fixationOptions == 5 && isfield(evt, 'total_fixations_in_region')
-                passesFixationType = evt.total_fixations_in_region == 1 && ...
-                                    (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1);
+            elseif fixationOptions == 1 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
+                % "Single Fixation" - only one fixation in this region during this pass
+                samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                       strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                       [EEG.event.region_pass_number] == evt.region_pass_number);
+                passesFixationType = (length(samePassFixations) == 1);
+            elseif fixationOptions == 2 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
+                % "First of Multiple" - first fixation when multiple exist in this pass
+                samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                       strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                       [EEG.event.region_pass_number] == evt.region_pass_number);
+                passesFixationType = (evt.fixation_in_pass == 1 && length(samePassFixations) > 1);
+            elseif fixationOptions == 3 && isfield(evt, 'fixation_in_pass')
+                % "Second of Multiple" - second fixation in this pass
+                passesFixationType = evt.fixation_in_pass == 2;
+            elseif fixationOptions == 4 && isfield(evt, 'fixation_in_pass')
+                % "All subsequent fixations" - 3rd+ fixations in this pass
+                passesFixationType = evt.fixation_in_pass > 2;
+            elseif fixationOptions == 5 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
+                % "Last in Region" - final fixation in this pass
+                samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                       strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                       [EEG.event.region_pass_number] == evt.region_pass_number);
+                if ~isempty(samePassFixations)
+                    maxFixInPass = max([EEG.event(samePassFixations).fixation_in_pass]);
+                    passesFixationType = (evt.fixation_in_pass == maxFixInPass);
+                end
             else
                 passesFixationType = true;
             end
         else
-            if isempty(fixationOptions) || any(fixationOptions == 1)
+            if isempty(fixationOptions) || any(fixationOptions == 0)
                 passesFixationType = true;
             else
                 for opt = fixationOptions
-                    if opt == 2 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1
+                    if opt == 1 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
+                        % "Single Fixation"
+                        samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                               strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                               [EEG.event.region_pass_number] == evt.region_pass_number);
+                        if length(samePassFixations) == 1
+                            passesFixationType = true;
+                            break;
+                        end
+                    elseif opt == 2 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
+                        % "First of Multiple"
+                        samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                               strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                               [EEG.event.region_pass_number] == evt.region_pass_number);
+                        if evt.fixation_in_pass == 1 && length(samePassFixations) > 1
+                            passesFixationType = true;
+                            break;
+                        end
+                    elseif opt == 3 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass == 2
                         passesFixationType = true;
                         break;
-                    elseif opt == 3 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
-                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
+                    elseif opt == 4 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass > 2
                         passesFixationType = true;
                         break;
-                    elseif opt == 4 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region > 1
-                        passesFixationType = true;
-                        break;
-                    elseif opt == 5 && isfield(evt, 'total_fixations_in_region') && evt.total_fixations_in_region == 1 && ...
-                            (~isfield(evt, 'total_fixations_in_word') || evt.total_fixations_in_word == 1)
-                        passesFixationType = true;
-                        break;
+                    elseif opt == 5 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
+                        % "Last in Region"
+                        samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
+                                               strcmp({EEG.event.current_region}, evt.current_region) & ...
+                                               [EEG.event.region_pass_number] == evt.region_pass_number);
+                        if ~isempty(samePassFixations)
+                            maxFixInPass = max([EEG.event(samePassFixations).fixation_in_pass]);
+                            if evt.fixation_in_pass == maxFixInPass
+                                passesFixationType = true;
+                                break;
+                            end
+                        end
                     end
                 end
             end
@@ -649,6 +695,31 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             filteredEEG.event(mm).eyesort_region_code = regionStr;
             filteredEEG.event(mm).eyesort_filter_code = filterStr;
             filteredEEG.event(mm).eyesort_full_code = newType;
+            
+            % Add BDF description columns directly (only to filtered events to minimize 7.3 risk)
+            if ~isempty(filterDescription)
+                % Get condition description string from lookup
+                conditionDesc = '';
+                if isfield(filteredEEG, 'eyesort_condition_descriptions') && ...
+                   isfield(filteredEEG, 'eyesort_condition_lookup') && ...
+                   isfield(evt, 'condition_number') && isfield(evt, 'item_number')
+                    key = sprintf('%d_%d', evt.condition_number, evt.item_number);
+                    validKey = matlab.lang.makeValidName(['k_' key]);
+                    condStruct = filteredEEG.eyesort_condition_descriptions;
+                    if isfield(condStruct, validKey)
+                        conditionNum = condStruct.(validKey); % This is numeric
+                        % Convert back to string using lookup
+                        if isKey(filteredEEG.eyesort_condition_lookup, num2str(conditionNum))
+                            conditionDesc = filteredEEG.eyesort_condition_lookup(num2str(conditionNum));
+                        end
+                    end
+                end
+                
+                % Store actual strings in dataset (only on filtered events)
+                filteredEEG.event(mm).bdf_condition_description = conditionDesc;
+                filteredEEG.event(mm).bdf_filter_description = filterDescription;
+                filteredEEG.event(mm).bdf_full_description = [conditionDesc '_' filterDescription];
+            end
         end
     end
     

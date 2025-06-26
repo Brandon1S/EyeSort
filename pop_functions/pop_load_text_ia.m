@@ -26,8 +26,8 @@ function [EEG, com] = pop_load_text_ia(EEG)
         [2 1]         % Pixels per char edit box
         [2 1]         % Number of regions edit box
         [0.4 1]       % Region names edit box
-        [2 1]         % Condition type column name edit box
-        [2 1]         % Condition code column name edit box
+        [2 1]         % Condition type column name edit box (string description of condition type)
+        [2 1]         % Condition code column name edit box (numeric code for condition type)
         [2 1]         % Item code column name edit box
         [2 1]         % Start Code
         [2 1]         % End Code
@@ -213,6 +213,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
             
             % Text parameters
             config.regionNames = get(findobj('tag','edtRegionNames'), 'String');
+            config.conditionTypeColName = get(findobj('tag','edtCondType'), 'String');
             config.conditionColName = get(findobj('tag','edtCondName'), 'String');
             config.itemColName = get(findobj('tag','edtItemName'), 'String');
             config.startCode = get(findobj('tag','edtStartCode'), 'String');
@@ -275,6 +276,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
                 'pxPerChar', 'edtPxPerChar', ...
                 'numRegions', 'edtNumRegions', ...
                 'regionNames', 'edtRegionNames', ...
+                'conditionTypeColName', 'edtCondType', ...
                 'conditionColName', 'edtCondName', ...
                 'itemColName', 'edtItemName', ...
                 'startCode', 'edtStartCode', ...
@@ -429,6 +431,10 @@ function [EEG, com] = pop_load_text_ia(EEG)
         condTriggersStr = get(findobj('tag','edtCondTriggers'), 'String');
         itemTriggersStr = get(findobj('tag','edtItemTriggers'), 'String');
         
+        % Get condition type column name
+        conditionTypeColName = get(findobj('tag','edtCondType'), 'String');
+        if iscell(conditionTypeColName), conditionTypeColName = conditionTypeColName{1}; end
+        
         % Convert cell arrays to strings if necessary
         if iscell(startCodeStr), startCodeStr = startCodeStr{1}; end
         if iscell(endCodeStr), endCodeStr = endCodeStr{1}; end
@@ -497,7 +503,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
                                               itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
                                               fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...
                                               saccadeStartXFieldStr, saccadeEndXFieldStr, ...
-                                              sentenceStartCodeStr, sentenceEndCodeStr, 'batch_mode', true);
+                                              sentenceStartCodeStr, sentenceEndCodeStr, conditionTypeColName, 'batch_mode', true);
                         
                         % Save intermediate dataset if requested
                         if saveIntermediate
@@ -578,7 +584,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
                                           itemColName, startCodeStr, endCodeStr, condTriggers, itemTriggers, ...
                                           fixationTypeStr, fixationXFieldStr, saccadeTypeStr, ...
                                           saccadeStartXFieldStr, saccadeEndXFieldStr, ...
-                                          sentenceStartCodeStr, sentenceEndCodeStr);
+                                          sentenceStartCodeStr, sentenceEndCodeStr, conditionTypeColName);
                 
                 % Save intermediate dataset if requested
                 saveIntermediate = get(findobj('tag','chkSaveIntermediate'), 'Value');

@@ -156,7 +156,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     
     % Define the options to be used for checkboxes
     passTypeOptions = {'First pass only', 'Second pass only', 'Third pass and beyond'};
-    fixationTypeOptions = {'First in region', 'Single fixation', 'Second of multiple', 'All subsequent fixations', 'Last in region'};
+    fixationTypeOptions = {'Single Fixation', 'First of Multiple', 'Second of Multiple', 'All subsequent fixations', 'Last in Region'};
     saccadeInDirectionOptions = {'Forward only', 'Backward only'};
     saccadeOutDirectionOptions = {'Forward only', 'Backward only'};
     
@@ -165,6 +165,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         [1 1 1 1], ...        % Filter Dataset Options title
         1, ...                % Configuration management
         [0.33 0.33 0.34], ... % Save config, Load config, Load last config buttons
+        1, ...                % Filter Description title
+        [2 1], ...            % Filter Description edit box
         1, ...                % Time-Locked Region title
         1, ...                % Time-Locked Region description
     };
@@ -180,6 +182,11 @@ function [EEG, com] = pop_filter_datasets(EEG)
         {'Style','pushbutton','String','Save Filter Config','callback', @save_filter_config_callback}, ...
         {'Style','pushbutton','String','Load Filter Config','callback', @load_filter_config_callback}, ...
         {'Style','pushbutton','String','Load Last Filter Config','callback', @load_last_filter_config_callback}, ...
+        ...
+        {'Style','text','String','Filter Description:', 'FontWeight', 'bold'}, ...
+        ...
+        {'Style','text','String','Description for this filter (used in BDF generation):'}, ...
+        {'Style','edit','String','','tag','edtFilterDescription'}, ...
         ...
         {'Style','text','String','Time-Locked Region Selection:', 'FontWeight', 'bold'}, ...
         ...
@@ -378,8 +385,31 @@ function [EEG, com] = pop_filter_datasets(EEG)
             % Clean up temporary files
             cleanup_temp_files(batchFilePaths);
             
-            % Clear batch mode after processing
-            evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+            % Load all processed datasets into ALLEEG for BDF generation
+            try
+                if ~isempty(outputDir)
+                    processedFiles = dir(fullfile(outputDir, '*_processed.set'));
+                    if ~isempty(processedFiles)
+                        fprintf('Loading %d processed datasets into ALLEEG for BDF generation...\n', length(processedFiles));
+                        ALLEEG = [];
+                        for i = 1:length(processedFiles)
+                            processedPath = fullfile(outputDir, processedFiles(i).name);
+                            EEG = pop_loadset('filename', processedPath);
+                            [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, i);
+                            fprintf('  Loaded: %s\n', processedFiles(i).name);
+                        end
+                        assignin('base', 'ALLEEG', ALLEEG);
+                        assignin('base', 'EEG', EEG); % Last dataset as current
+                        assignin('base', 'CURRENTSET', CURRENTSET);
+                        fprintf('Successfully loaded %d processed datasets into ALLEEG\n', length(ALLEEG));
+                    end
+                end
+            catch ME
+                fprintf('Warning: Could not load processed datasets into ALLEEG: %s\n', ME.message);
+            end
+            
+            % Clear batch mode after processing (keep output dir for BDF generation)
+            evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_mode');
             
             com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtering completed with %d filters applied', current_batch_filter_count);
             
@@ -510,8 +540,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
             end
             
             % Fixation type selections
-            config.fixFirstInRegion = get(findobj('tag','chkFixType1'), 'Value');
-            config.fixSingleFixation = get(findobj('tag','chkFixType2'), 'Value');
+            config.fixSingleFixation = get(findobj('tag','chkFixType1'), 'Value');
+            config.fixFirstOfMultiple = get(findobj('tag','chkFixType2'), 'Value');
             config.fixSecondMultiple = get(findobj('tag','chkFixType3'), 'Value');
             config.fixAllSubsequent = get(findobj('tag','chkFixType4'), 'Value');
             config.fixLastInRegion = get(findobj('tag','chkFixType5'), 'Value');
@@ -521,6 +551,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
             config.saccadeInBackward = get(findobj('tag','chkSaccadeIn2'), 'Value');
             config.saccadeOutForward = get(findobj('tag','chkSaccadeOut1'), 'Value');
             config.saccadeOutBackward = get(findobj('tag','chkSaccadeOut2'), 'Value');
+            
+            % Filter description
+            config.filterDescription = get(findobj('tag','edtFilterDescription'), 'String');
+            if iscell(config.filterDescription)
+                config.filterDescription = config.filterDescription{1};
+            end
             
             % Store available regions for validation when loading
             config.availableRegions = regionNames;
@@ -603,12 +639,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
                 end
             end
             
-            % Apply fixation type selections
-            if isfield(config, 'fixFirstInRegion')
-                set(findobj('tag','chkFixType1'), 'Value', config.fixFirstInRegion);
-            end
+            % Apply fixation options
             if isfield(config, 'fixSingleFixation')
-                set(findobj('tag','chkFixType2'), 'Value', config.fixSingleFixation);
+                set(findobj('tag','chkFixType1'), 'Value', config.fixSingleFixation);
+            end
+            if isfield(config, 'fixFirstOfMultiple')
+                set(findobj('tag','chkFixType2'), 'Value', config.fixFirstOfMultiple);
             end
             if isfield(config, 'fixSecondMultiple')
                 set(findobj('tag','chkFixType3'), 'Value', config.fixSecondMultiple);
@@ -632,6 +668,11 @@ function [EEG, com] = pop_filter_datasets(EEG)
             end
             if isfield(config, 'saccadeOutBackward')
                 set(findobj('tag','chkSaccadeOut2'), 'Value', config.saccadeOutBackward);
+            end
+            
+            % Apply filter description
+            if isfield(config, 'filterDescription')
+                set(findobj('tag','edtFilterDescription'), 'String', config.filterDescription);
             end
             
         catch ME
@@ -674,8 +715,31 @@ function [EEG, com] = pop_filter_datasets(EEG)
                     % Clean up temporary files
                     cleanup_temp_files(batchFilePaths);
                     
-                    % Clear batch mode after processing
-                    evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
+                    % Load all processed datasets into ALLEEG for BDF generation
+                    try
+                        if ~isempty(outputDir)
+                            processedFiles = dir(fullfile(outputDir, '*_processed.set'));
+                            if ~isempty(processedFiles)
+                                fprintf('Loading %d processed datasets into ALLEEG for BDF generation...\n', length(processedFiles));
+                                ALLEEG = [];
+                                for i = 1:length(processedFiles)
+                                    processedPath = fullfile(outputDir, processedFiles(i).name);
+                                    EEG = pop_loadset('filename', processedPath);
+                                    [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, i);
+                                    fprintf('  Loaded: %s\n', processedFiles(i).name);
+                                end
+                                assignin('base', 'ALLEEG', ALLEEG);
+                                assignin('base', 'EEG', EEG); % Last dataset as current
+                                assignin('base', 'CURRENTSET', CURRENTSET);
+                                fprintf('Successfully loaded %d processed datasets into ALLEEG\n', length(ALLEEG));
+                            end
+                        end
+                    catch ME
+                        fprintf('Warning: Could not load processed datasets into ALLEEG: %s\n', ME.message);
+                    end
+                    
+                    % Clear batch mode after processing (keep output dir for BDF generation)
+                    evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_mode');
                     
                     com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtering completed with %d filters applied', current_batch_filter_count);
                     
@@ -784,6 +848,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
         for i = 1:length(nextRegionCheckboxTags)
             set(findobj('tag', nextRegionCheckboxTags{i}), 'Value', 0);
         end
+        
+        % Reset the filter description
+        set(findobj('tag','edtFilterDescription'), 'String', '');
     end
 
     % Batch apply filters with proper filter count tracking
@@ -912,23 +979,23 @@ function [EEG, com] = pop_filter_datasets(EEG)
         
         % Fixation options
         fixationOptions = [];
-        if isfield(config, 'fixFirstInRegion') && config.fixFirstInRegion
+        if isfield(config, 'fixSingleFixation') && config.fixSingleFixation
+            fixationOptions(end+1) = 1;
+        end
+        if isfield(config, 'fixFirstOfMultiple') && config.fixFirstOfMultiple
             fixationOptions(end+1) = 2;
         end
-        if isfield(config, 'fixSingleFixation') && config.fixSingleFixation
+        if isfield(config, 'fixSecondMultiple') && config.fixSecondMultiple
             fixationOptions(end+1) = 3;
         end
-        if isfield(config, 'fixSecondMultiple') && config.fixSecondMultiple
+        if isfield(config, 'fixAllSubsequent') && config.fixAllSubsequent
             fixationOptions(end+1) = 4;
         end
-        if isfield(config, 'fixAllSubsequent') && config.fixAllSubsequent
+        if isfield(config, 'fixLastInRegion') && config.fixLastInRegion
             fixationOptions(end+1) = 5;
         end
-        if isfield(config, 'fixLastInRegion') && config.fixLastInRegion
-            fixationOptions(end+1) = 6;
-        end
         if isempty(fixationOptions)
-            fixationOptions = 1;
+            fixationOptions = 0; % Default to "any fixation"
         end
         filter_params{end+1} = 'fixationOptions';
         filter_params{end+1} = fixationOptions;
@@ -967,6 +1034,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
         filter_params{end+1} = [];
         filter_params{end+1} = 'items';
         filter_params{end+1} = [];
+        
+        % Add filter description
+        if isfield(config, 'filterDescription') && ~isempty(config.filterDescription)
+            filter_params{end+1} = 'filterDescription';
+            filter_params{end+1} = config.filterDescription;
+        end
     end
 
     % Helper function to create an inline if statement (ternary operator)

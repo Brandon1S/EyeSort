@@ -64,6 +64,7 @@ function EEG = compute_text_based_ia(EEG, varargin)
                 regionNames = strtrim(regionNames); % Remove whitespace
             end
             conditionColName = config.conditionColName;
+            conditionTypeColName = config.conditionTypeColName;
             itemColName = config.itemColName;
             startCode = config.startCode;
             endCode = config.endCode;
@@ -103,7 +104,7 @@ function EEG = compute_text_based_ia(EEG, varargin)
             
         else
             % Individual parameters method (original)
-            if length(varargin) < 17
+            if length(varargin) < 18
                 error('compute_text_based_ia: Not enough input arguments. Either provide a config file or all individual parameters.');
             end
             
@@ -125,9 +126,10 @@ function EEG = compute_text_based_ia(EEG, varargin)
             saccadeEndXField = varargin{16};
             sentenceStartCode = varargin{17};
             sentenceEndCode = varargin{18};
+            conditionTypeColName = varargin{19};
             
             % Parse optional parameters
-            remaining_args = varargin(19:end);
+            remaining_args = varargin(20:end);
             p = inputParser;
             addParameter(p, 'batch_mode', false, @islogical);
             parse(p, remaining_args{:});
@@ -148,7 +150,7 @@ function EEG = compute_text_based_ia(EEG, varargin)
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
                                               fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
-                                              sentenceStartCode, sentenceEndCode);
+                                              sentenceStartCode, sentenceEndCode, conditionTypeColName);
             
             % Store back in the array - NO SAVING
             EEG(idx) = currentEEG;
@@ -162,14 +164,14 @@ function EEG = compute_text_based_ia(EEG, varargin)
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
                                               fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
-                                              sentenceStartCode, sentenceEndCode);
+                                              sentenceStartCode, sentenceEndCode, conditionTypeColName);
 end
 
 function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                                               numRegions, regionNames, conditionColName, itemColName, ...
                                               startCode, endCode, conditionTriggers, itemTriggers, ...
                                               fixationType, fixationXField, saccadeType, saccadeStartXField, saccadeEndXField, ...
-                                              sentenceStartCode, sentenceEndCode)
+                                              sentenceStartCode, sentenceEndCode, conditionTypeColName)
     %% PROCESS_SINGLE_DATASET - Core processing function for interest areas
     %
     % This function processes a single EEG dataset, performing the following steps:
@@ -181,7 +183,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     % 6. Stores metadata in the EEG structure for later use
     
     %% Step 1: Validate inputs and read the interest area text file
-    if nargin < 19
+    if nargin < 20
         error('compute_text_based_ia_word_level: Not enough input arguments. Field names and sentence codes must be specified.');
     end
     
@@ -245,16 +247,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     fprintf('Using condition column: %s\n', conditionColName);
     fprintf('Using item column: %s\n', itemColName);
 
-    % Display sample data for verification
-    fprintf('\nFirst few rows of condition and item data:\n');
-    head_data = head(data);
-    try
-        disp([head_data.(conditionColName), head_data.(itemColName)]);
-    catch ME
-        fprintf('Error accessing columns: %s\n', ME.message);
-        disp(data.Properties.VariableNames);
-        rethrow(ME);
-    end
+
 
     %% Step 3: Calculate region and word boundaries for each stimulus
     % Create containers to store region and word boundary information
@@ -262,6 +255,8 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     boundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');        % For region boundaries
     wordBoundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');    % For word boundaries within regions
     regionWordsMap = containers.Map('KeyType', 'char', 'ValueType', 'any');     % For storing actual words in each region
+    conditionDescMap = struct();   % For condition descriptions (BDF)
+    conditionDescLookup = containers.Map(); % String descriptions by numeric code
 
     % Process each row (stimulus) in the text file
     fprintf('Processing %d rows of data...\n', height(data));
@@ -346,6 +341,18 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
             boundaryMap(key) = regionBoundaries;
             wordBoundaryMap(key) = wordBoundaries;
             regionWordsMap(key) = regionWords;
+            
+            % Store condition description for BDF generation
+            condDesc = data.(conditionTypeColName)(iRow);
+            if iscell(condDesc), condDesc = condDesc{1}; end
+            % Get condition number for numeric storage
+            conditionNum = data.(conditionColName)(iRow);
+            if iscell(conditionNum), conditionNum = conditionNum{1}; end
+            % Store numeric code instead of string to avoid 7.3 format
+            validKey = matlab.lang.makeValidName(['k_' key]);
+            conditionDescMap.(validKey) = conditionNum; % Store numeric code
+            % Keep string lookup separate
+            conditionDescLookup(num2str(conditionNum)) = condDesc;
         catch ME
             warning('Error processing row %d: %s', iRow, ME.message);
         end
@@ -447,11 +454,13 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
             end
         end
 
-        % If we're in a valid trial with a known stimulus, assign boundaries to events
+                % If we're in a valid trial with a known stimulus, assign boundaries to events
         if trialRunning && ~isempty(lastValidKey)
             % Assign region boundaries if available for this stimulus
             if isKey(boundaryMap, lastValidKey)
                 regionBoundaries = boundaryMap(lastValidKey);
+                
+
                 
                 % Store the complete region boundaries matrix
                 EEG.event(iEvt).regionBoundaries = regionBoundaries;
@@ -544,6 +553,10 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     
     % Store the region names for use by other functions
     EEG.region_names = regionNames;
+    
+    % Store condition description struct for BDF generation during filtering
+    EEG.eyesort_condition_descriptions = conditionDescMap;
+    EEG.eyesort_condition_lookup = conditionDescLookup;
 
     % Add a custom field to track processing status
     EEG.eyesort_processed = true;
