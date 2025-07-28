@@ -31,6 +31,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
         [2 1]         % Item code column name edit box
         [2 1]         % Start Code
         [2 1]         % End Code
+        1             % Use sentence codes checkbox
         [2 1]         % Sentence Start Code
         [2 1]         % Sentence End Code
         [2 1]         % Condition Triggers
@@ -88,11 +89,13 @@ function [EEG, com] = pop_load_text_ia(EEG)
         {'Style','text','String','End Trial Code:'}, ...
         {'Style','edit','String','S255','tag','edtEndCode'}, ...
         ...
+        {'Style','checkbox','String','I have sentence start/end timing codes','tag','chkUseSentenceCodes','Value',0,'callback',@toggle_sentence_codes}, ...
+        ...
         {'Style','text','String','Sentence Start Code:'}, ...
-        {'Style','edit','String','S250','tag','edtSentenceStartCode'}, ...
+        {'Style','edit','String','S250','tag','edtSentenceStartCode','Enable','off'}, ...
         ...
         {'Style','text','String','Sentence End Code:'}, ...
-        {'Style','edit','String','S251','tag','edtSentenceEndCode'}, ...
+        {'Style','edit','String','S251','tag','edtSentenceEndCode','Enable','off'}, ...
         ...
         {'Style','text','String','Condition Triggers (comma-separated):'}, ...
         {'Style','edit','String','S211, S213, S221, S223','tag','edtCondTriggers'}, ...
@@ -144,6 +147,21 @@ function [EEG, com] = pop_load_text_ia(EEG)
     function cancel_button(~,~)
         close(gcf);
         disp('User selected cancel: No text file for text interest areas');
+    end
+
+    function toggle_sentence_codes(~,~)
+        % Enable/disable sentence code fields based on checkbox state
+        checkboxValue = get(findobj(gcf, 'tag', 'chkUseSentenceCodes'), 'Value');
+        
+        if checkboxValue
+            % Enable the sentence code fields
+            set(findobj(gcf, 'tag', 'edtSentenceStartCode'), 'Enable', 'on');
+            set(findobj(gcf, 'tag', 'edtSentenceEndCode'), 'Enable', 'on');
+        else
+            % Disable the sentence code fields and clear them
+            set(findobj(gcf, 'tag', 'edtSentenceStartCode'), 'Enable', 'off', 'String', '');
+            set(findobj(gcf, 'tag', 'edtSentenceEndCode'), 'Enable', 'off', 'String', '');
+        end
     end
 
     function save_config_callback(~,~)
@@ -245,6 +263,9 @@ function [EEG, com] = pop_load_text_ia(EEG)
             % Save intermediate option
             config.saveIntermediate = get(findobj('tag','chkSaveIntermediate'), 'Value');
             
+            % Sentence codes usage flag
+            config.useSentenceCodes = get(findobj('tag','chkUseSentenceCodes'), 'Value');
+            
             % Convert cell arrays to strings if necessary (except triggers which should stay as cell arrays)
             fields = fieldnames(config);
             for i = 1:length(fields)
@@ -291,9 +312,15 @@ function [EEG, com] = pop_load_text_ia(EEG)
                 'saccadeStartXField', 'edtSaccadeStartXField', ...
                 'saccadeEndXField', 'edtSaccadeEndXField');
             
-            % Apply checkbox separately
+            % Apply checkboxes separately
             if isfield(config, 'saveIntermediate')
                 set(findobj('tag', 'chkSaveIntermediate'), 'Value', config.saveIntermediate);
+            end
+            
+            if isfield(config, 'useSentenceCodes')
+                set(findobj('tag', 'chkUseSentenceCodes'), 'Value', config.useSentenceCodes);
+                % Trigger the callback to enable/disable sentence code fields
+                toggle_sentence_codes();
             end
             
             config_fields = fieldnames(field_mapping);
@@ -426,8 +453,16 @@ function [EEG, com] = pop_load_text_ia(EEG)
         % Get new parameters from GUI
         startCodeStr = get(findobj('tag','edtStartCode'), 'String');
         endCodeStr = get(findobj('tag','edtEndCode'), 'String');
-        sentenceStartCodeStr = get(findobj('tag','edtSentenceStartCode'), 'String');
-        sentenceEndCodeStr = get(findobj('tag','edtSentenceEndCode'), 'String');
+        
+        % Check if user wants to use sentence codes
+        useSentenceCodes = get(findobj('tag','chkUseSentenceCodes'), 'Value');
+        if useSentenceCodes
+            sentenceStartCodeStr = get(findobj('tag','edtSentenceStartCode'), 'String');
+            sentenceEndCodeStr = get(findobj('tag','edtSentenceEndCode'), 'String');
+        else
+            sentenceStartCodeStr = '';
+            sentenceEndCodeStr = '';
+        end
         condTriggersStr = get(findobj('tag','edtCondTriggers'), 'String');
         itemTriggersStr = get(findobj('tag','edtItemTriggers'), 'String');
         
@@ -509,7 +544,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
                         if saveIntermediate
                             [~, fileName, ~] = fileparts(batchFilenames{i});
                             intermediate_output_path = fullfile(outputDir, [fileName '_eyesort_ia.set']);
-                            pop_saveset(processedEEG, 'filename', intermediate_output_path, 'savemode', 'onefile');
+                            pop_saveset(processedEEG, 'filename', intermediate_output_path, 'savemode', 'twofiles');
                             fprintf('Intermediate dataset saved: %s\n', [fileName '_eyesort_ia.set']);
                         end
                         
@@ -523,7 +558,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
                         end
                         
                         temp_output_path = fullfile(temp_dir, [fileName '_textia_temp.set']);
-                        pop_saveset(processedEEG, 'filename', temp_output_path, 'savemode', 'onefile');
+                        pop_saveset(processedEEG, 'filename', temp_output_path, 'savemode', 'twofiles');
                         
                         % Update the file path to point to processed version
                         batchFilePaths{i} = temp_output_path;
@@ -603,7 +638,7 @@ function [EEG, com] = pop_load_text_ia(EEG)
                     end
                     
                     if ~isempty(intermediate_path)
-                        pop_saveset(processedEEG, 'filename', intermediate_path, 'savemode', 'onefile');
+                        pop_saveset(processedEEG, 'filename', intermediate_path, 'savemode', 'twofiles');
                         fprintf('Intermediate dataset saved: %s\n', intermediate_path);
                     end
                 end

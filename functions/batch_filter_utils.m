@@ -52,8 +52,8 @@ try
             [~, fileName, ~] = fileparts(batchFilenames{i});
             output_path = fullfile(outputDir, [fileName '_eyesort_filtered.set']);
             
-            % Save without triggering EEGLAB dialogs
-            pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'onefile');
+            % Save with both .set and .fdt files
+            pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'twofiles');
             
             processed_count = processed_count + 1;
             fprintf('Successfully filtered: %s\n', batchFilenames{i});

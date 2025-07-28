@@ -355,7 +355,7 @@ function [EEG, com] = pop_load_datasets(EEG)
                     if ~isempty(outputDir)
                         [~, fileName, ~] = fileparts(dataset_path);
                         output_path = fullfile(outputDir, [fileName '_processed.set']);
-                        pop_saveset(EEG, 'filename', output_path, 'savemode', 'onefile');
+                        pop_saveset(EEG, 'filename', output_path, 'savemode', 'twofiles');
                     end
                     
                 catch ME

@@ -140,7 +140,7 @@ function save_all_filtered_datasets
                 selectedEEG.filepath = filepath;
                 
                 % Now save the dataset with the chosen filename
-                [selectedEEG, cancelFlag] = pop_saveset(selectedEEG, 'filename', filename, 'filepath', filepath, 'savemode', 'onefile');
+                [selectedEEG, cancelFlag] = pop_saveset(selectedEEG, 'filename', filename, 'filepath', filepath, 'savemode', 'twofiles');
             else
                 % User cancelled
                 cancelFlag = 1;

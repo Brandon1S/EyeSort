@@ -109,6 +109,7 @@ if ~isempty(varargin) && ischar(varargin{1}) && (endsWith(varargin{1}, '.m') || 
     conditions = get_config_value(config, 'conditions', []);
     items = get_config_value(config, 'items', []);
     filterCount = get_config_value(config, 'filterCount', []);
+    filterDescription = get_config_value(config, 'filterDescription', '');
     
 else
     % Individual parameters method (original)
@@ -270,7 +271,7 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                                               saccadeOutOptions, filterCount, ...
                                               fixationType, fixationXField, saccadeType, ...
                                               saccadeStartXField, saccadeEndXField, filterDescription)
-    % Internal filtering implementation
+    % Optimized internal filtering implementation with O(n) complexity
     
     % Create a copy of the EEG structure
     filteredEEG = EEG;
@@ -330,61 +331,188 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
     % Track events with conflicting codes
     conflictingEvents = {};
     
-    % Apply filtering criteria
-    for mm = 1:length(EEG.event)
+    % ========== PERFORMANCE OPTIMIZATION: PRE-COMPUTE ALL INDICES ==========
+    fprintf('Pre-computing event indices for optimized filtering...\n');
+    
+    % Pre-extract all event fields for vectorized operations
+    nEvents = length(EEG.event);
+    eventTypes = cell(nEvents, 1);
+    originalTypes = cell(nEvents, 1);
+    currentRegions = cell(nEvents, 1);
+    lastRegionVisited = cell(nEvents, 1);
+    trialNumbers = zeros(nEvents, 1);
+    regionPassNumbers = zeros(nEvents, 1);
+    fixationInPass = zeros(nEvents, 1);
+    conditionNumbers = zeros(nEvents, 1);
+    itemNumbers = zeros(nEvents, 1);
+    
+    % Extract all fields in one pass
+    for i = 1:nEvents
+        evt = EEG.event(i);
+        eventTypes{i} = evt.type;
+        if isfield(evt, 'original_type')
+            originalTypes{i} = evt.original_type;
+        else
+            originalTypes{i} = '';
+        end
+        if isfield(evt, 'current_region')
+            currentRegions{i} = evt.current_region;
+        else
+            currentRegions{i} = '';
+        end
+        if isfield(evt, 'last_region_visited')
+            lastRegionVisited{i} = evt.last_region_visited;
+        else
+            lastRegionVisited{i} = '';
+        end
+        if isfield(evt, 'trial_number')
+            trialNumbers(i) = evt.trial_number;
+        end
+        if isfield(evt, 'region_pass_number')
+            regionPassNumbers(i) = evt.region_pass_number;
+        end
+        if isfield(evt, 'fixation_in_pass')
+            fixationInPass(i) = evt.fixation_in_pass;
+        end
+        if isfield(evt, 'condition_number')
+            conditionNumbers(i) = evt.condition_number;
+        end
+        if isfield(evt, 'item_number')
+            itemNumbers(i) = evt.item_number;
+        end
+    end
+    
+    % Identify fixation events (vectorized)
+    isFixation = false(nEvents, 1);
+    for i = 1:nEvents
+        if ischar(eventTypes{i}) && startsWith(eventTypes{i}, fixationType)
+            isFixation(i) = true;
+        elseif ~isempty(originalTypes{i}) && ischar(originalTypes{i}) && startsWith(originalTypes{i}, fixationType)
+            isFixation(i) = true;
+        elseif ischar(eventTypes{i}) && length(eventTypes{i}) == 6 && isfield(EEG.event(i), 'eyesort_full_code')
+            isFixation(i) = true;
+        end
+    end
+    
+    % Get fixation indices
+    fixationIndices = find(isFixation);
+    
+    % Pre-compute next region relationships (vectorized)
+    nextRegionMap = containers.Map('KeyType', 'int32', 'ValueType', 'any');
+    for i = 1:length(fixationIndices)
+        idx = fixationIndices(i);
+        currentReg = currentRegions{idx};
+        if isempty(currentReg), continue; end
+        
+        % Find next different region among remaining fixations
+        nextRegion = '';
+        for j = i+1:length(fixationIndices)
+            nextIdx = fixationIndices(j);
+            nextReg = currentRegions{nextIdx};
+            if ~isempty(nextReg) && ~strcmp(nextReg, currentReg)
+                nextRegion = nextReg;
+                break;
+            end
+        end
+        nextRegionMap(idx) = nextRegion;
+    end
+    
+    % Pre-compute fixation groupings by trial/region/pass
+    fixationGroups = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    for i = 1:length(fixationIndices)
+        idx = fixationIndices(i);
+        if trialNumbers(idx) == 0 || isempty(currentRegions{idx}) || regionPassNumbers(idx) == 0
+            continue;
+        end
+        
+        key = sprintf('%d_%s_%d', trialNumbers(idx), currentRegions{idx}, regionPassNumbers(idx));
+        if isKey(fixationGroups, key)
+            groupIndices = fixationGroups(key);
+            groupIndices(end+1) = idx;
+            fixationGroups(key) = groupIndices;
+        else
+            fixationGroups(key) = idx;
+        end
+    end
+    
+    % Pre-compute saccade relationships
+    saccadeIndices = find(strcmp(eventTypes, saccadeType));
+    prevSaccadeMap = containers.Map('KeyType', 'int32', 'ValueType', 'any');
+    nextSaccadeMap = containers.Map('KeyType', 'int32', 'ValueType', 'any');
+    
+    for i = 1:length(fixationIndices)
+        idx = fixationIndices(i);
+        
+        % Find previous saccade
+        prevSaccade = [];
+        for j = 1:length(saccadeIndices)
+            if saccadeIndices(j) < idx
+                prevSaccade = saccadeIndices(j);
+            else
+                break;
+            end
+        end
+        if ~isempty(prevSaccade)
+            prevSaccadeMap(idx) = prevSaccade;
+        end
+        
+        % Find next saccade
+        nextSaccade = [];
+        for j = 1:length(saccadeIndices)
+            if saccadeIndices(j) > idx
+                nextSaccade = saccadeIndices(j);
+                break;
+            end
+        end
+        if ~isempty(nextSaccade)
+            nextSaccadeMap(idx) = nextSaccade;
+        end
+    end
+    
+    fprintf('Pre-computation complete. Processing %d fixation events...\n', length(fixationIndices));
+    
+    % ========== OPTIMIZED FILTERING LOOP ==========
+    for i = 1:length(fixationIndices)
+        mm = fixationIndices(i);
         evt = EEG.event(mm);
         
+        % Check basic filters first (fastest)
         % Check if this is a fixation event or a previously coded fixation event
-        isFixation = false;
-        
-        if ischar(evt.type) && startsWith(evt.type, fixationType)
-            isFixation = true;
-        elseif isfield(evt, 'original_type') && ischar(evt.original_type) && startsWith(evt.original_type, fixationType)
-            isFixation = true;
-        elseif ischar(evt.type) && length(evt.type) == 6 && isfield(evt, 'eyesort_full_code')
-            isFixation = true;
-        end
-        
-        if ~isFixation
+        if ~isFixation(mm)
             continue;
         end
         
-        % Check for condition and item filters
-        passesCondition = true;
-        if ~isempty(conditions) && isfield(evt, 'condition_number')
-            passesCondition = any(evt.condition_number == conditions);
-        end
-                          
-        passesItem = true;
-        if ~isempty(items) && isfield(evt, 'item_number')
-            passesItem = any(evt.item_number == items);
+        % Check for condition and item filters (vectorized)
+        if ~isempty(conditions) && conditionNumbers(mm) > 0
+            if ~any(conditionNumbers(mm) == conditions)
+                continue;
+            end
         end
         
-        if ~passesCondition || ~passesItem
-            continue;
+        if ~isempty(items) && itemNumbers(mm) > 0
+            if ~any(itemNumbers(mm) == items)
+                continue;
+            end
         end
         
-        % Time-locked region filter
-        passesTimeLockedRegion = true;
-        if ~isempty(timeLockedRegions) && isfield(evt, 'current_region')
-            passesTimeLockedRegion = any(strcmp(evt.current_region, timeLockedRegions));
+        % Time-locked region filter (vectorized)
+        if ~isempty(timeLockedRegions) && ~isempty(currentRegions{mm})
+            if ~any(strcmp(currentRegions{mm}, timeLockedRegions))
+                continue;
+            end
         end
         
-        if ~passesTimeLockedRegion
-            continue;
-        end
-        
-        % Pass index filtering
+        % Pass index filtering (optimized)
         passesPassIndex = false;
         if isscalar(passOptions)
             if passOptions == 1
                 passesPassIndex = true;
-            elseif passOptions == 2 && isfield(evt, 'region_pass_number')
-                passesPassIndex = (evt.region_pass_number == 1);
-            elseif passOptions == 3 && isfield(evt, 'region_pass_number')
-                passesPassIndex = (evt.region_pass_number == 2);
-            elseif passOptions == 4 && isfield(evt, 'region_pass_number')
-                passesPassIndex = (evt.region_pass_number >= 3);
+            elseif passOptions == 2
+                passesPassIndex = (regionPassNumbers(mm) == 1);
+            elseif passOptions == 3
+                passesPassIndex = (regionPassNumbers(mm) == 2);
+            elseif passOptions == 4
+                passesPassIndex = (regionPassNumbers(mm) >= 3);
             else
                 passesPassIndex = true;
             end
@@ -393,13 +521,13 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                 passesPassIndex = true;
             else
                 for opt = passOptions
-                    if opt == 2 && isfield(evt, 'region_pass_number') && evt.region_pass_number == 1
+                    if opt == 2 && regionPassNumbers(mm) == 1
                         passesPassIndex = true;
                         break;
-                    elseif opt == 3 && isfield(evt, 'region_pass_number') && evt.region_pass_number == 2
+                    elseif opt == 3 && regionPassNumbers(mm) == 2
                         passesPassIndex = true;
                         break;
-                    elseif opt == 4 && isfield(evt, 'region_pass_number') && evt.region_pass_number >= 3
+                    elseif opt == 4 && regionPassNumbers(mm) >= 3
                         passesPassIndex = true;
                         break;
                     end
@@ -407,74 +535,64 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             end
         end
         
-        % Previous region filtering
-        passesPrevRegion = true;
+        if ~passesPassIndex
+            continue;
+        end
+        
+        % Previous region filtering (optimized)
         if ~isempty(prevRegions)
-            passesPrevRegion = any(strcmp(evt.last_region_visited, prevRegions));
+            if isempty(lastRegionVisited{mm}) || ~any(strcmp(lastRegionVisited{mm}, prevRegions))
+                continue;
+            end
         end
         
-        % Next region filtering
-        passesNextRegion = true;
+        % Next region filtering (optimized with pre-computed map)
         if ~isempty(nextRegions)
-            nextDifferentRegionFound = false;
-            currentRegion = evt.current_region;
-            
-            for jj = mm+1:length(EEG.event)
-                nextEvt = EEG.event(jj);
-                isNextFixation = false;
-                
-                if ischar(nextEvt.type) && startsWith(nextEvt.type, fixationType)
-                    isNextFixation = true;
-                elseif isfield(nextEvt, 'original_type') && ischar(nextEvt.original_type) && startsWith(nextEvt.original_type, fixationType)
-                    isNextFixation = true;
-                elseif ischar(nextEvt.type) && length(nextEvt.type) == 6 && isfield(nextEvt, 'eyesort_full_code')
-                    isNextFixation = true;
-                end
-                
-                if isNextFixation && isfield(nextEvt, 'current_region')
-                    if ~strcmp(nextEvt.current_region, currentRegion)
-                        nextDifferentRegionFound = true;
-                        passesNextRegion = any(strcmp(nextEvt.current_region, nextRegions));
-                        break;
-                    end
-                end
+            if ~isKey(nextRegionMap, mm)
+                continue;
             end
-            if ~nextDifferentRegionFound
-                passesNextRegion = false;
+            nextReg = nextRegionMap(mm);
+            if isempty(nextReg) || ~any(strcmp(nextReg, nextRegions))
+                continue;
             end
         end
         
-        % Fixation type filtering
+        % Fixation type filtering (optimized with pre-computed groups)
         passesFixationType = false;
         if isscalar(fixationOptions)
             if fixationOptions == 0
                 passesFixationType = true;
-            elseif fixationOptions == 1 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
-                % "Single Fixation" - only one fixation in this region during this pass
-                samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
-                                       strcmp({EEG.event.current_region}, evt.current_region) & ...
-                                       [EEG.event.region_pass_number] == evt.region_pass_number);
-                passesFixationType = (length(samePassFixations) == 1);
-            elseif fixationOptions == 2 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
-                % "First of Multiple" - first fixation when multiple exist in this pass
-                samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
-                                       strcmp({EEG.event.current_region}, evt.current_region) & ...
-                                       [EEG.event.region_pass_number] == evt.region_pass_number);
-                passesFixationType = (evt.fixation_in_pass == 1 && length(samePassFixations) > 1);
-            elseif fixationOptions == 3 && isfield(evt, 'fixation_in_pass')
-                % "Second of Multiple" - second fixation in this pass
-                passesFixationType = evt.fixation_in_pass == 2;
-            elseif fixationOptions == 4 && isfield(evt, 'fixation_in_pass')
-                % "All subsequent fixations" - 3rd+ fixations in this pass
-                passesFixationType = evt.fixation_in_pass > 2;
-            elseif fixationOptions == 5 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
-                % "Last in Region" - final fixation in this pass
-                samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
-                                       strcmp({EEG.event.current_region}, evt.current_region) & ...
-                                       [EEG.event.region_pass_number] == evt.region_pass_number);
-                if ~isempty(samePassFixations)
-                    maxFixInPass = max([EEG.event(samePassFixations).fixation_in_pass]);
-                    passesFixationType = (evt.fixation_in_pass == maxFixInPass);
+            elseif fixationOptions == 1
+                % Single fixation - check group size
+                if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                    key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                    if isKey(fixationGroups, key)
+                        groupIndices = fixationGroups(key);
+                        passesFixationType = (length(groupIndices) == 1);
+                    end
+                end
+            elseif fixationOptions == 2
+                % First of multiple
+                if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                    key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                    if isKey(fixationGroups, key)
+                        groupIndices = fixationGroups(key);
+                        passesFixationType = (fixationInPass(mm) == 1 && length(groupIndices) > 1);
+                    end
+                end
+            elseif fixationOptions == 3
+                passesFixationType = (fixationInPass(mm) == 2);
+            elseif fixationOptions == 4
+                passesFixationType = (fixationInPass(mm) > 2);
+            elseif fixationOptions == 5
+                % Last in region
+                if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                    key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                    if isKey(fixationGroups, key)
+                        groupIndices = fixationGroups(key);
+                        maxFixInPass = max(fixationInPass(groupIndices));
+                        passesFixationType = (fixationInPass(mm) == maxFixInPass);
+                    end
                 end
             else
                 passesFixationType = true;
@@ -484,38 +602,36 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                 passesFixationType = true;
             else
                 for opt = fixationOptions
-                    if opt == 1 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
-                        % "Single Fixation"
-                        samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
-                                               strcmp({EEG.event.current_region}, evt.current_region) & ...
-                                               [EEG.event.region_pass_number] == evt.region_pass_number);
-                        if length(samePassFixations) == 1
-                            passesFixationType = true;
-                            break;
+                    if opt == 1 && trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                        if isKey(fixationGroups, key)
+                            groupIndices = fixationGroups(key);
+                            if length(groupIndices) == 1
+                                passesFixationType = true;
+                                break;
+                            end
                         end
-                    elseif opt == 2 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
-                        % "First of Multiple"
-                        samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
-                                               strcmp({EEG.event.current_region}, evt.current_region) & ...
-                                               [EEG.event.region_pass_number] == evt.region_pass_number);
-                        if evt.fixation_in_pass == 1 && length(samePassFixations) > 1
-                            passesFixationType = true;
-                            break;
+                    elseif opt == 2 && trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                        if isKey(fixationGroups, key)
+                            groupIndices = fixationGroups(key);
+                            if fixationInPass(mm) == 1 && length(groupIndices) > 1
+                                passesFixationType = true;
+                                break;
+                            end
                         end
-                    elseif opt == 3 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass == 2
+                    elseif opt == 3 && fixationInPass(mm) == 2
                         passesFixationType = true;
                         break;
-                    elseif opt == 4 && isfield(evt, 'fixation_in_pass') && evt.fixation_in_pass > 2
+                    elseif opt == 4 && fixationInPass(mm) > 2
                         passesFixationType = true;
                         break;
-                    elseif opt == 5 && isfield(evt, 'fixation_in_pass') && isfield(evt, 'region_pass_number')
-                        % "Last in Region"
-                        samePassFixations = find([EEG.event.trial_number] == evt.trial_number & ...
-                                               strcmp({EEG.event.current_region}, evt.current_region) & ...
-                                               [EEG.event.region_pass_number] == evt.region_pass_number);
-                        if ~isempty(samePassFixations)
-                            maxFixInPass = max([EEG.event(samePassFixations).fixation_in_pass]);
-                            if evt.fixation_in_pass == maxFixInPass
+                    elseif opt == 5 && trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                        if isKey(fixationGroups, key)
+                            groupIndices = fixationGroups(key);
+                            maxFixInPass = max(fixationInPass(groupIndices));
+                            if fixationInPass(mm) == maxFixInPass
                                 passesFixationType = true;
                                 break;
                             end
@@ -525,201 +641,191 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             end
         end
         
-        % Saccade in direction filtering
+        if ~passesFixationType
+            continue;
+        end
+        
+        % Saccade in direction filtering (optimized with pre-computed map)
         passesSaccadeInDirection = false;
         if isscalar(saccadeInOptions)
             if saccadeInOptions == 1
                 passesSaccadeInDirection = true;
             else
-                inSaccadeFound = false;
-                for jj = mm-1:-1:1
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        inSaccadeFound = true;
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        
-                        if saccadeInOptions == 2
-                            passesSaccadeInDirection = isForward && abs(xChange) > 10;
-                        elseif saccadeInOptions == 3
-                            passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
-                        elseif saccadeInOptions == 4
-                            passesSaccadeInDirection = abs(xChange) > 10;
-                        end
-                        break;
+                if isKey(prevSaccadeMap, mm)
+                    prevSaccadeIdx = prevSaccadeMap(mm);
+                    xChange = EEG.event(prevSaccadeIdx).(saccadeEndXField) - EEG.event(prevSaccadeIdx).(saccadeStartXField);
+                    isForward = xChange > 0;
+                    
+                    if saccadeInOptions == 2
+                        passesSaccadeInDirection = isForward && abs(xChange) > 10;
+                    elseif saccadeInOptions == 3
+                        passesSaccadeInDirection = ~isForward && abs(xChange) > 10;
+                    elseif saccadeInOptions == 4
+                        passesSaccadeInDirection = abs(xChange) > 10;
                     end
-                end
-                if ~inSaccadeFound && saccadeInOptions < 4
-                    passesSaccadeInDirection = false;
-                end
+                                 else
+                     if saccadeInOptions == 4
+                         passesSaccadeInDirection = true;
+                     else
+                         passesSaccadeInDirection = false;
+                     end
+                 end
             end
         else
             if isempty(saccadeInOptions) || any(saccadeInOptions == 1)
                 passesSaccadeInDirection = true;
             else
-                inSaccadeFound = false;
-                xChange = 0;
-                isForward = false;
-                
-                for jj = mm-1:-1:1
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        inSaccadeFound = true;
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        break;
-                    end
-                end
-                
-                if inSaccadeFound && abs(xChange) > 10
-                    for opt = saccadeInOptions
-                        if opt == 2 && isForward
-                            passesSaccadeInDirection = true;
-                            break;
-                        elseif opt == 3 && ~isForward
-                            passesSaccadeInDirection = true;
-                            break;
-                        elseif opt == 4
-                            passesSaccadeInDirection = true;
-                            break;
+                if isKey(prevSaccadeMap, mm)
+                    prevSaccadeIdx = prevSaccadeMap(mm);
+                    xChange = EEG.event(prevSaccadeIdx).(saccadeEndXField) - EEG.event(prevSaccadeIdx).(saccadeStartXField);
+                    isForward = xChange > 0;
+                    
+                    if abs(xChange) > 10
+                        for opt = saccadeInOptions
+                            if opt == 2 && isForward
+                                passesSaccadeInDirection = true;
+                                break;
+                            elseif opt == 3 && ~isForward
+                                passesSaccadeInDirection = true;
+                                break;
+                            elseif opt == 4
+                                passesSaccadeInDirection = true;
+                                break;
+                            end
                         end
                     end
                 end
             end
         end
         
-        % Saccade out direction filtering
+        if ~passesSaccadeInDirection
+            continue;
+        end
+        
+        % Saccade out direction filtering (optimized with pre-computed map)
         passesSaccadeOutDirection = false;
         if isscalar(saccadeOutOptions)
             if saccadeOutOptions == 1
                 passesSaccadeOutDirection = true;
             else
-                outSaccadeFound = false;
-                for jj = mm+1:length(EEG.event)
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        outSaccadeFound = true;
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        
-                        if saccadeOutOptions == 2
-                            passesSaccadeOutDirection = isForward && abs(xChange) > 10;
-                        elseif saccadeOutOptions == 3
-                            passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
-                        elseif saccadeOutOptions == 4
-                            passesSaccadeOutDirection = abs(xChange) > 10;
-                        end
-                        break;
+                if isKey(nextSaccadeMap, mm)
+                    nextSaccadeIdx = nextSaccadeMap(mm);
+                    xChange = EEG.event(nextSaccadeIdx).(saccadeEndXField) - EEG.event(nextSaccadeIdx).(saccadeStartXField);
+                    isForward = xChange > 0;
+                    
+                    if saccadeOutOptions == 2
+                        passesSaccadeOutDirection = isForward && abs(xChange) > 10;
+                    elseif saccadeOutOptions == 3
+                        passesSaccadeOutDirection = ~isForward && abs(xChange) > 10;
+                    elseif saccadeOutOptions == 4
+                        passesSaccadeOutDirection = abs(xChange) > 10;
                     end
-                end
-                if ~outSaccadeFound && saccadeOutOptions > 1 && saccadeOutOptions < 4
-                    passesSaccadeOutDirection = false;
-                end
+                                 else
+                     if saccadeOutOptions > 1 && saccadeOutOptions < 4
+                         passesSaccadeOutDirection = false;
+                     else
+                         passesSaccadeOutDirection = true;
+                     end
+                 end
             end
         else
             if isempty(saccadeOutOptions) || any(saccadeOutOptions == 1)
                 passesSaccadeOutDirection = true;
             else
-                outSaccadeFound = false;
-                xChange = 0;
-                isForward = false;
-                
-                for jj = mm+1:length(EEG.event)
-                    if strcmp(EEG.event(jj).type, saccadeType)
-                        outSaccadeFound = true;
-                        xChange = EEG.event(jj).(saccadeEndXField) - EEG.event(jj).(saccadeStartXField);
-                        isForward = xChange > 0;
-                        break;
-                    end
-                end
-                
-                if outSaccadeFound && abs(xChange) > 10
-                    for opt = saccadeOutOptions
-                        if opt == 2 && isForward
-                            passesSaccadeOutDirection = true;
-                            break;
-                        elseif opt == 3 && ~isForward
-                            passesSaccadeOutDirection = true;
-                            break;
-                        elseif opt == 4
-                            passesSaccadeOutDirection = true;
-                            break;
+                if isKey(nextSaccadeMap, mm)
+                    nextSaccadeIdx = nextSaccadeMap(mm);
+                    xChange = EEG.event(nextSaccadeIdx).(saccadeEndXField) - EEG.event(nextSaccadeIdx).(saccadeStartXField);
+                    isForward = xChange > 0;
+                    
+                    if abs(xChange) > 10
+                        for opt = saccadeOutOptions
+                            if opt == 2 && isForward
+                                passesSaccadeOutDirection = true;
+                                break;
+                            elseif opt == 3 && ~isForward
+                                passesSaccadeOutDirection = true;
+                                break;
+                            elseif opt == 4
+                                passesSaccadeOutDirection = true;
+                                break;
+                            end
                         end
                     end
                 end
             end
         end
         
-        % Check if the event passes all filters
-        passes = passesPassIndex && passesPrevRegion && passesNextRegion && ...
-                 passesFixationType && passesSaccadeInDirection && passesSaccadeOutDirection;
+        if ~passesSaccadeOutDirection
+            continue;
+        end
         
-        % If the event passes all filters, update its type code
-        if passes
-            matchedEventCount = matchedEventCount + 1;
-            
-            % Generate the 6-digit event code
-            condStr = '';
-            if isfield(evt, 'condition_number') && ~isempty(evt.condition_number)
-                condNum = evt.condition_number;
-                condStr = sprintf('%02d', mod(condNum, 100));
-            else
-                condStr = '00';
-            end
-            
-            regionStr = '';
-            if isfield(evt, 'current_region') && ~isempty(evt.current_region) && isKey(regionCodeMap, evt.current_region)
-                regionStr = regionCodeMap(evt.current_region);
-            else
-                regionStr = '00';
-            end
-            
-            filterStr = filterCode;
-            newType = sprintf('%s%s%s', condStr, regionStr, filterStr);
-            
-            % Store the original type if this is the first time we're coding this event
-            if ~isfield(evt, 'original_type')
-                filteredEEG.event(mm).original_type = evt.type;
-            end
-            
-            % Check for existing code in the event
-            if isfield(evt, 'eyesort_full_code') && ~isempty(evt.eyesort_full_code)
-                conflictingEvents{end+1} = struct(...
-                    'event_index', mm, ...
-                    'existing_code', evt.eyesort_full_code, ...
-                    'new_code', newType, ...
-                    'condition', evt.condition_number, ...
-                    'region', evt.current_region);
-            end
-            
-            % Update the event type and related fields
-            filteredEEG.event(mm).type = newType;
-            filteredEEG.event(mm).eyesort_condition_code = condStr;
-            filteredEEG.event(mm).eyesort_region_code = regionStr;
-            filteredEEG.event(mm).eyesort_filter_code = filterStr;
-            filteredEEG.event(mm).eyesort_full_code = newType;
-            
-            % Add BDF description columns directly (only to filtered events to minimize 7.3 risk)
-            if ~isempty(filterDescription)
-                % Get condition description string from lookup
-                conditionDesc = '';
-                if isfield(filteredEEG, 'eyesort_condition_descriptions') && ...
-                   isfield(filteredEEG, 'eyesort_condition_lookup') && ...
-                   isfield(evt, 'condition_number') && isfield(evt, 'item_number')
-                    key = sprintf('%d_%d', evt.condition_number, evt.item_number);
-                    validKey = matlab.lang.makeValidName(['k_' key]);
-                    condStruct = filteredEEG.eyesort_condition_descriptions;
-                    if isfield(condStruct, validKey)
-                        conditionNum = condStruct.(validKey); % This is numeric
-                        % Convert back to string using lookup
-                        if isKey(filteredEEG.eyesort_condition_lookup, num2str(conditionNum))
-                            conditionDesc = filteredEEG.eyesort_condition_lookup(num2str(conditionNum));
-                        end
+        % If we reach here, the event passes all filters
+        matchedEventCount = matchedEventCount + 1;
+        
+        % Generate the 6-digit event code
+        condStr = '';
+        if conditionNumbers(mm) > 0
+            condStr = sprintf('%02d', mod(conditionNumbers(mm), 100));
+        else
+            condStr = '00';
+        end
+        
+        regionStr = '';
+        if ~isempty(currentRegions{mm}) && isKey(regionCodeMap, currentRegions{mm})
+            regionStr = regionCodeMap(currentRegions{mm});
+        else
+            regionStr = '00';
+        end
+        
+        filterStr = filterCode;
+        newType = sprintf('%s%s%s', condStr, regionStr, filterStr);
+        
+        % Store the original type if this is the first time we're coding this event
+        if ~isfield(evt, 'original_type')
+            filteredEEG.event(mm).original_type = evt.type;
+        end
+        
+        % Check for existing code in the event
+        if isfield(evt, 'eyesort_full_code') && ~isempty(evt.eyesort_full_code)
+            conflictingEvents{end+1} = struct(...
+                'event_index', mm, ...
+                'existing_code', evt.eyesort_full_code, ...
+                'new_code', newType, ...
+                'condition', conditionNumbers(mm), ...
+                'region', currentRegions{mm});
+            continue; % Skip this event instead of overwriting
+        end
+        
+        % Update the event type and related fields
+        filteredEEG.event(mm).type = newType;
+        filteredEEG.event(mm).eyesort_condition_code = condStr;
+        filteredEEG.event(mm).eyesort_region_code = regionStr;
+        filteredEEG.event(mm).eyesort_filter_code = filterStr;
+        filteredEEG.event(mm).eyesort_full_code = newType;
+        
+        % Add BDF description columns directly (only to filtered events to minimize 7.3 risk)
+        if ~isempty(filterDescription)
+            % Get condition description string from lookup
+            conditionDesc = '';
+            if isfield(filteredEEG, 'eyesort_condition_descriptions') && ...
+               isfield(filteredEEG, 'eyesort_condition_lookup') && ...
+               conditionNumbers(mm) > 0 && itemNumbers(mm) > 0
+                key = sprintf('%d_%d', conditionNumbers(mm), itemNumbers(mm));
+                validKey = matlab.lang.makeValidName(['k_' key]);
+                condStruct = filteredEEG.eyesort_condition_descriptions;
+                if isfield(condStruct, validKey)
+                    conditionNum = condStruct.(validKey); % This is numeric
+                    % Convert back to string using lookup
+                    if isKey(filteredEEG.eyesort_condition_lookup, num2str(conditionNum))
+                        conditionDesc = filteredEEG.eyesort_condition_lookup(num2str(conditionNum));
                     end
                 end
-                
-                % Store actual strings in dataset (only on filtered events)
-                filteredEEG.event(mm).bdf_condition_description = conditionDesc;
-                filteredEEG.event(mm).bdf_filter_description = filterDescription;
-                filteredEEG.event(mm).bdf_full_description = [conditionDesc '_' filterDescription];
             end
+            
+            % Store actual strings in dataset (only on filtered events)
+            filteredEEG.event(mm).bdf_condition_description = char(conditionDesc);
+            filteredEEG.event(mm).bdf_filter_description = char(filterDescription);
+            filteredEEG.event(mm).bdf_full_description = strcat(char(conditionDesc), '_', char(filterDescription));
         end
     end
     

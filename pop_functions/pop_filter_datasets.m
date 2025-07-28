@@ -915,7 +915,16 @@ function [EEG, com] = pop_filter_datasets(EEG)
                     
                     % Save with consistent clean name
                     output_path = fullfile(outputDir, [cleanFileName '_processed.set']);
-                    pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'onefile');
+                    pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'twofiles');
+                    
+                    % Clear variables to free memory and prevent storage bloat
+                    clear tempEEG filteredEEG;
+                    % Force MATLAB to clean up memory (if available)
+                    try
+                        pack;
+                    catch
+                        % pack not available in this MATLAB version, skip
+                    end
                     
                     processed_count = processed_count + 1;
                     fprintf('Successfully processed dataset %d/%d: %s with filter %02d\n', processed_count, length(filePaths), cleanFileName, filterNum);
