@@ -1,21 +1,21 @@
-function filter_params = convert_config_to_params(config)
-% CONVERT_CONFIG_TO_PARAMS - Convert GUI configuration to filter parameters
+function label_params = convert_config_to_params(config)
+% CONVERT_CONFIG_TO_PARAMS - Convert GUI configuration to label parameters
 %
 % Usage:
-%   filter_params = convert_config_to_params(config)
+%   label_params = convert_config_to_params(config)
 %
 % Inputs:
-%   config - Filter configuration structure from GUI
+%   config - Label configuration structure from GUI
 %
 % Outputs:
-%   filter_params - Cell array of name-value parameter pairs for filter_datasets_core
+%   label_params - Cell array of name-value parameter pairs for label_datasets_core
 
-filter_params = {};
+label_params = {};
 
 % Time-locked regions
 if isfield(config, 'selectedRegions') && ~isempty(config.selectedRegions)
-    filter_params{end+1} = 'timeLockedRegions';
-    filter_params{end+1} = config.selectedRegions;
+    label_params{end+1} = 'timeLockedRegions';
+    label_params{end+1} = config.selectedRegions;
 end
 
 % Pass options
@@ -32,19 +32,19 @@ end
 if isempty(passOptions)
     passOptions = 1;
 end
-filter_params{end+1} = 'passOptions';
-filter_params{end+1} = passOptions;
+label_params{end+1} = 'passOptions';
+label_params{end+1} = passOptions;
 
 % Previous regions
 if isfield(config, 'selectedPrevRegions') && ~isempty(config.selectedPrevRegions)
-    filter_params{end+1} = 'prevRegions';
-    filter_params{end+1} = config.selectedPrevRegions;
+    label_params{end+1} = 'prevRegions';
+    label_params{end+1} = config.selectedPrevRegions;
 end
 
 % Next regions
 if isfield(config, 'selectedNextRegions') && ~isempty(config.selectedNextRegions)
-    filter_params{end+1} = 'nextRegions';
-    filter_params{end+1} = config.selectedNextRegions;
+    label_params{end+1} = 'nextRegions';
+    label_params{end+1} = config.selectedNextRegions;
 end
 
 % Fixation options
@@ -67,8 +67,8 @@ end
 if isempty(fixationOptions)
     fixationOptions = 1;
 end
-filter_params{end+1} = 'fixationOptions';
-filter_params{end+1} = fixationOptions;
+label_params{end+1} = 'fixationOptions';
+label_params{end+1} = fixationOptions;
 
 % Saccade in options
 saccadeInOptions = [];
@@ -81,8 +81,8 @@ end
 if isempty(saccadeInOptions)
     saccadeInOptions = 1;
 end
-filter_params{end+1} = 'saccadeInOptions';
-filter_params{end+1} = saccadeInOptions;
+label_params{end+1} = 'saccadeInOptions';
+label_params{end+1} = saccadeInOptions;
 
 % Saccade out options
 saccadeOutOptions = [];
@@ -95,7 +95,7 @@ end
 if isempty(saccadeOutOptions)
     saccadeOutOptions = 1;
 end
-filter_params{end+1} = 'saccadeOutOptions';
-filter_params{end+1} = saccadeOutOptions;
+label_params{end+1} = 'saccadeOutOptions';
+label_params{end+1} = saccadeOutOptions;
 
 end 

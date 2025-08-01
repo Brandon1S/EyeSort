@@ -1,5 +1,5 @@
 function generate_bdf_file(varargin)
-% GENERATE_BDF_FILE - Creates a BINLISTER Bin Descriptor File from EyeSort filtered datasets
+% GENERATE_BDF_FILE - Creates a BINLISTER Bin Descriptor File from EyeSort labeled datasets
 %
 % Usage:
 %   >> generate_bdf_file;                     % Interactive mode with dialog
@@ -8,38 +8,36 @@ function generate_bdf_file(varargin)
 %   >> generate_bdf_file(EEG, outputFile);    % Specify output file path
 %
 % Inputs:
-%   EEG        - EEGLAB EEG structure with filtered events (optional)
-%   ALLEEG     - EEGLAB ALLEEG structure containing filtered datasets (optional)
+%   EEG        - EEGLAB EEG structure with labeled events (optional)
+%   ALLEEG     - EEGLAB ALLEEG structure containing labeled datasets (optional)
 %   outputFile - Full path to output BDF file (optional)
 %
-% This function analyzes the 6-digit filter codes in filtered datasets and
+% This function analyzes the 6-digit label codes in labeled datasets and
 % automatically generates a BINLISTER compatible bin descriptor file (BDF).
 % The 6-digit codes follow this pattern:
 %   - First 2 digits: Condition code (00-99)
 %   - Middle 2 digits: Region code (01-99)
-%   - Last 2 digits: Filter code (01-99)
+%   - Last 2 digits: Label code (01-99)
 %
-% See also: pop_filter_datasets, batch_filter_dataset
+% See also: pop_label_datasets, batch_label_dataset
 
     % Check for input arguments
     if nargin < 1
         % No inputs provided, try base workspace first
         try
-            % First try to get ALLEEG (preferred for multiple datasets)
+            % First try to get single EEG dataset (preferred for single dataset mode)
             try
+                EEG = evalin('base', 'EEG');
+                fprintf('Found single EEG dataset in workspace\n');
+            catch
+                % Fall back to ALLEEG for multiple datasets
                 ALLEEG = evalin('base', 'ALLEEG');
                 if ~isempty(ALLEEG) && length(ALLEEG) >= 1
                     fprintf('Found ALLEEG with %d datasets in workspace\n', length(ALLEEG));
                     EEG = ALLEEG; % Use ALLEEG as the dataset array
                 else
-                    % Fall back to single EEG dataset
-                    EEG = evalin('base', 'EEG');
-                    fprintf('Found single EEG dataset in workspace\n');
+                    error('No valid EEG datasets found');
                 end
-            catch
-                % Fall back to single EEG dataset
-                EEG = evalin('base', 'EEG');
-                fprintf('Found single EEG dataset in workspace\n');
             end
             
 
@@ -68,7 +66,7 @@ function generate_bdf_file(varargin)
     % Initialize variables to store unique codes
     allCodes = {};
     
-    % Extract all filtered event codes from the dataset(s)
+    % Extract all labeled event codes from the dataset(s)
     if length(EEG) > 1
         % Multiple datasets (ALLEEG)
         fprintf('Processing %d datasets...\n', length(EEG));
@@ -76,26 +74,26 @@ function generate_bdf_file(varargin)
         for i = 1:length(EEG)
             if ~isempty(EEG(i)) && isfield(EEG(i), 'event') && ~isempty(EEG(i).event)
                 fprintf('Extracting codes from dataset %d...\n', i);
-                datasetCodes = extract_filtered_codes(EEG(i));
+                datasetCodes = extract_labeled_codes(EEG(i));
                 allCodes = [allCodes, datasetCodes];
             end
         end
     else
         % Single dataset
-        allCodes = extract_filtered_codes(EEG);
+        allCodes = extract_labeled_codes(EEG);
     end
     
     % Get unique codes and sort them
     uniqueCodes = unique(allCodes);
-    fprintf('Found %d unique filter codes.\n', length(uniqueCodes));
+    fprintf('Found %d unique label codes.\n', length(uniqueCodes));
     
-    % Check if we have any filtered events
+    % Check if we have any labeled events
     if isempty(uniqueCodes)
-        error('No filtered events found. Please run filtering first.');
+        error('No labeled events found. Please run labeling first.');
     end
     
-    % Create a structure to organize filters by condition and region
-    codeMap = organize_filter_codes(uniqueCodes);
+    % Create a structure to organize labels by condition and region
+    codeMap = organize_label_codes(uniqueCodes);
     
     % Create and write the BDF file
     write_bdf_file(codeMap, outputFile);
@@ -103,9 +101,9 @@ function generate_bdf_file(varargin)
     fprintf('BDF file successfully created at: %s\n', outputFile);
 end
 
-function filteredCodes = extract_filtered_codes(EEG)
-    % Extract all 6-digit filtered event codes from an EEG dataset
-    filteredCodes = {};
+function labeledCodes = extract_labeled_codes(EEG)
+    % Extract all 6-digit labeled event codes from an EEG dataset
+    labeledCodes = {};
     
     if ~isfield(EEG, 'event') || isempty(EEG.event)
         return;
@@ -114,20 +112,20 @@ function filteredCodes = extract_filtered_codes(EEG)
     for i = 1:length(EEG.event)
         % Check for eyesort_full_code field (preferred method)
         if isfield(EEG.event(i), 'eyesort_full_code') && ~isempty(EEG.event(i).eyesort_full_code)
-            filteredCodes{end+1} = EEG.event(i).eyesort_full_code;
+            labeledCodes{end+1} = EEG.event(i).eyesort_full_code;
         % Also check for 6-digit type string (fallback method)
         elseif isfield(EEG.event(i), 'type') && ischar(EEG.event(i).type)
             eventType = EEG.event(i).type;
-            % Check if this is a 6-digit code created by the filter process
-            if length(eventType) == 6 && all(isstrprop(eventType, 'digit'))
-                filteredCodes{end+1} = eventType;
+            % Check if this is a 6-digit code created by the label process
+                if length(eventType) == 6 && all(isstrprop(eventType, 'digit'))
+                labeledCodes{end+1} = eventType;
             end
         end
     end
 end
 
-function codeMap = organize_filter_codes(uniqueCodes)
-    % Organize filter codes by condition and region
+function codeMap = organize_label_codes(uniqueCodes)
+    % Organize label codes by condition and region
     codeMap = struct();
     
     % Collect condition codes (first 2 digits)
@@ -140,21 +138,21 @@ function codeMap = organize_filter_codes(uniqueCodes)
         
         % Find all codes for this condition
         condCodeIndices = find(cellfun(@(x) strcmp(x(1:2), condCode), uniqueCodes));
-        condFilterCodes = uniqueCodes(condCodeIndices);
+        condLabelCodes = uniqueCodes(condCodeIndices);
         
         % Extract region codes (middle 2 digits)
-        regionCodes = unique(cellfun(@(x) x(3:4), condFilterCodes, 'UniformOutput', false));
+        regionCodes = unique(cellfun(@(x) x(3:4), condLabelCodes, 'UniformOutput', false));
         
-        % For each region in this condition, collect filter codes (last 2 digits)
+        % For each region in this condition, collect label codes (last 2 digits)
         for r = 1:length(regionCodes)
             regionCode = regionCodes{r};
             
             % Find all codes for this condition and region
             regionIndices = find(cellfun(@(x) strcmp(x(1:2), condCode) && strcmp(x(3:4), regionCode), uniqueCodes));
-            regionFilterCodes = uniqueCodes(regionIndices);
+            regionLabelCodes = uniqueCodes(regionIndices);
             
-            % Store all filter codes for this condition and region
-            codeMap.(sprintf('cond%s', condCode)).(sprintf('region%s', regionCode)) = regionFilterCodes;
+            % Store all label codes for this condition and region
+            codeMap.(sprintf('cond%s', condCode)).(sprintf('region%s', regionCode)) = regionLabelCodes;
         end
     end
 end
@@ -183,20 +181,20 @@ function write_bdf_file(codeMap, outputFile)
     regionNameMap('03') = 'Target_word';
     regionNameMap('04') = 'Ending';
     
-    % Get filter descriptions from EEG/ALLEEG structure if available
+    % Get label descriptions from EEG/ALLEEG structure if available
     try
-        filterDescriptions = [];
+        labelDescriptions = [];
         
         % Try ALLEEG first, then fall back to EEG
         try
             ALLEEG_workspace = evalin('base', 'ALLEEG');
             if ~isempty(ALLEEG_workspace) && length(ALLEEG_workspace) >= 1
-                % Check first dataset in ALLEEG for filter descriptions
-                if isfield(ALLEEG_workspace(1), 'eyesort_filter_descriptions') && ~isempty(ALLEEG_workspace(1).eyesort_filter_descriptions)
-                    filterDescriptions = ALLEEG_workspace(1).eyesort_filter_descriptions;
-                    fprintf('Found %d filter descriptions in ALLEEG, will include in BDF file.\n', length(filterDescriptions));
+                % Check first dataset in ALLEEG for label descriptions
+                if isfield(ALLEEG_workspace(1), 'eyesort_label_descriptions') && ~isempty(ALLEEG_workspace(1).eyesort_label_descriptions)
+                    labelDescriptions = ALLEEG_workspace(1).eyesort_label_descriptions;
+                    fprintf('Found %d label descriptions in ALLEEG, will include in BDF file.\n', length(labelDescriptions));
                 else
-                    fprintf('No filter descriptions found in ALLEEG datasets.\n');
+                    fprintf('No label descriptions found in ALLEEG datasets.\n');
                 end
             end
         catch
@@ -205,31 +203,31 @@ function write_bdf_file(codeMap, outputFile)
                 EEG_workspace = evalin('base', 'EEG');
                 % Handle both single dataset and array of datasets
                 if length(EEG_workspace) > 1
-                    % Multiple datasets - check the first one for filter descriptions
-                    if isfield(EEG_workspace(1), 'eyesort_filter_descriptions') && ~isempty(EEG_workspace(1).eyesort_filter_descriptions)
-                        filterDescriptions = EEG_workspace(1).eyesort_filter_descriptions;
-                        fprintf('Found %d filter descriptions in first EEG dataset, will include in BDF file.\n', length(filterDescriptions));
+                    % Multiple datasets - check the first one for label descriptions
+                    if isfield(EEG_workspace(1), 'eyesort_label_descriptions') && ~isempty(EEG_workspace(1).eyesort_label_descriptions)
+                        labelDescriptions = EEG_workspace(1).eyesort_label_descriptions;
+                        fprintf('Found %d label descriptions in first EEG dataset, will include in BDF file.\n', length(labelDescriptions));
                     else
-                        fprintf('No filter descriptions found in EEG datasets.\n');
+                        fprintf('No label descriptions found in EEG datasets.\n');
                     end
                 else
                     % Single dataset
-                    if isfield(EEG_workspace, 'eyesort_filter_descriptions') && ~isempty(EEG_workspace.eyesort_filter_descriptions)
-                        filterDescriptions = EEG_workspace.eyesort_filter_descriptions;
-                        fprintf('Found %d filter descriptions in EEG structure, will include in BDF file.\n', length(filterDescriptions));
+                    if isfield(EEG_workspace, 'eyesort_label_descriptions') && ~isempty(EEG_workspace.eyesort_label_descriptions)
+                        labelDescriptions = EEG_workspace.eyesort_label_descriptions;
+                        fprintf('Found %d label descriptions in EEG structure, will include in BDF file.\n', length(labelDescriptions));
                     else
-                        fprintf('No filter descriptions found in EEG structure.\n');
+                        fprintf('No label descriptions found in EEG structure.\n');
                     end
                 end
             catch
-                fprintf('No filter descriptions found in workspace.\n');
+                fprintf('No label descriptions found in workspace.\n');
             end
         end
         
 
     catch ME
-        fprintf('Error retrieving filter descriptions: %s\n', ME.message);
-        filterDescriptions = [];
+        fprintf('Error retrieving label descriptions: %s\n', ME.message);
+        labelDescriptions = [];
     end
     
     % Process each condition
@@ -253,39 +251,39 @@ function write_bdf_file(codeMap, outputFile)
                 regionName = sprintf('Region%s', regionCode);
             end
             
-            % Get all filter codes for this condition and region
-            filterCodes = codeMap.(condField).(regionField);
+            % Get all label codes for this condition and region
+            labelCodes = codeMap.(condField).(regionField);
             
-            % Process each filter code to create detailed description
-            for f = 1:length(filterCodes)
-                currentCode = filterCodes{f};
-                filterCode = currentCode(5:6); % Last 2 digits are the filter code
+            % Process each label code to create detailed description
+            for f = 1:length(labelCodes)
+                currentCode = labelCodes{f};
+                labelCode = currentCode(5:6); % Last 2 digits are the label code
                 
                 % Create base descriptive bin name (just condition, let user description handle the rest)
                 baseDescription = sprintf('Condition %s', condCode);
                 
-                % Try to find detailed filter description
+                % Try to find detailed label description
                 detailedDescription = '';
-                if ~isempty(filterDescriptions)
-                    filterFound = false;
+                if ~isempty(labelDescriptions)
+                    labelFound = false;
                     
-                    % Look for matching filter code in filter descriptions
-                    for d = 1:length(filterDescriptions)
-                        % Try multiple ways to match the filter code
+                    % Look for matching label code in label descriptions
+                    for d = 1:length(labelDescriptions)
+                        % Try multiple ways to match the label code
                         isMatch = false;
                         
-                        if isfield(filterDescriptions{d}, 'filter_code') && ...
-                           strcmp(filterDescriptions{d}.filter_code, filterCode)
+                        if isfield(labelDescriptions{d}, 'label_code') && ...
+                           strcmp(labelDescriptions{d}.label_code, labelCode)
                             isMatch = true;
-                        elseif isfield(filterDescriptions{d}, 'filter_number') && ...
-                              filterDescriptions{d}.filter_number == str2double(filterCode)
+                        elseif isfield(labelDescriptions{d}, 'label_number') && ...
+                              labelDescriptions{d}.label_number == str2double(labelCode)
                             isMatch = true;
                         end
                         
                         if isMatch
-                            fprintf('  Found matching filter description at index %d\n', d);
-                            filterFound = true;
-                            desc = filterDescriptions{d};
+                            fprintf('  Found matching label description at index %d\n', d);
+                            labelFound = true;
+                            desc = labelDescriptions{d};
                             
                             % Build detailed description
                             detailedDescription = baseDescription;
@@ -380,18 +378,18 @@ function write_bdf_file(codeMap, outputFile)
                         end
                     end
                     
-                    if ~filterFound
-                        fprintf('  No matching filter description found for code %s\n', filterCode);
+                    if ~labelFound
+                        fprintf('  No matching label description found for code %s\n', labelCode);
                     end
                 end
                 
                 % If no detailed description was found, use the base description
                 if isempty(detailedDescription)
                     detailedDescription = baseDescription;
-                    detailedDescription = [detailedDescription, sprintf(', Filter: %s', filterCode)];
+                    detailedDescription = [detailedDescription, sprintf(', Label: %s', labelCode)];
                 end
                 
-                % Try to enhance description with BDF condition and filter description fields
+                % Try to enhance description with BDF condition and label description fields
                 try
                     % Find events with this code to get BDF description information
                     % Get datasets from workspace since EEG variable is not in scope here
@@ -412,7 +410,7 @@ function write_bdf_file(codeMap, outputFile)
                         continue;
                     end
                     
-                    % Look for events with this filter code that have BDF description fields
+                    % Look for events with this label code that have BDF description fields
                     for i = 1:length(allEvents)
                         evt = allEvents(i);
                         if isfield(evt, 'eyesort_full_code') && strcmp(evt.eyesort_full_code, currentCode)
@@ -420,9 +418,9 @@ function write_bdf_file(codeMap, outputFile)
                             if isfield(evt, 'bdf_full_description') && ~isempty(evt.bdf_full_description)
                                 detailedDescription = evt.bdf_full_description;
                                 break;
-                            elseif isfield(evt, 'bdf_filter_description') && ~isempty(evt.bdf_filter_description)
-                                % Just use the user's filter description directly
-                                detailedDescription = [baseDescription, ' - ', evt.bdf_filter_description];
+                            elseif isfield(evt, 'bdf_label_description') && ~isempty(evt.bdf_label_description)
+                                % Just use the user's label description directly
+                                detailedDescription = [baseDescription, ' - ', evt.bdf_label_description];
                                 break;
                             end
                         end

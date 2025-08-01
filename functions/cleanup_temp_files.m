@@ -7,5 +7,5 @@ function cleanup_temp_files(batchFilePaths)
 % Inputs:
 %   batchFilePaths - Cell array of file paths to clean up
 
-batch_filter_utils('cleanup', batchFilePaths);
+batch_label_utils('cleanup', batchFilePaths);
 end 

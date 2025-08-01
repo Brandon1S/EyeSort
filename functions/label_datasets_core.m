@@ -1,22 +1,22 @@
-function [filteredEEG, com] = filter_datasets_core(EEG, varargin)
-% FILTER_DATASETS_CORE - Core filtering function for EEG datasets
+function [labeledEEG, com] = label_datasets_core(EEG, varargin)
+% LABEL_DATASETS_CORE - Core labeling function for EEG datasets
 %
 % Usage:
 %   Method 1 - Using config file:
-%   [filteredEEG, com] = filter_datasets_core(EEG, configFilePath)
-%   [filteredEEG, com] = filter_datasets_core(EEG, 'config_file', configFilePath)
+%   [labeledEEG, com] = label_datasets_core(EEG, configFilePath)
+%   [labeledEEG, com] = label_datasets_core(EEG, 'config_file', configFilePath)
 %
 %   Method 2 - Using individual parameters:
-%   [filteredEEG, com] = filter_datasets_core(EEG, 'param', value, ...)
+%   [labeledEEG, com] = label_datasets_core(EEG, 'param', value, ...)
 %
 % Required Input:
 %   EEG - EEGLAB dataset structure
 %
 % For config file method:
-%   configFilePath - Path to .m config file containing filter parameters
+%   configFilePath - Path to .m config file containing label parameters
 %
 % For individual parameters method (name-value pairs):
-%   'timeLockedRegions'    - Cell array of region names to filter on
+%   'timeLockedRegions'    - Cell array of region names to label on
 %   'passOptions'          - Array of pass type options (1=any, 2=first, 3=second, 4=third+)
 %   'prevRegions'          - Cell array of previous region names
 %   'nextRegions'          - Cell array of next region names  
@@ -25,10 +25,10 @@ function [filteredEEG, com] = filter_datasets_core(EEG, varargin)
 %   'saccadeOutOptions'    - Array of saccade out direction options (1=any, 2=forward, 3=backward)
 %   'conditions'           - Array of condition numbers to include
 %   'items'                - Array of item numbers to include
-%   'filterCount'          - Filter number (auto-incremented if not provided)
+%   'labelCount'          - Label number (auto-incremented if not provided)
 %
 % Outputs:
-%   filteredEEG - Filtered EEG dataset
+%   labeledEEG - Labeled EEG dataset
 %   com         - Command string for EEGLAB history
 
 % Initialize output
@@ -47,12 +47,12 @@ if ~isempty(varargin) && ischar(varargin{1}) && (endsWith(varargin{1}, '.m') || 
         timeLockedRegions = get_config_value(config, 'selectedRegions', []);
     end
     
-    % Check if filtering is enabled AFTER field mapping
+    % Check if labeling is enabled AFTER field mapping
     if isempty(timeLockedRegions)
-        % No filtering requested
-        filteredEEG = EEG;
+        % No labeling requested
+        labeledEEG = EEG;
         com = '';
-        fprintf('No time_locked_regions specified in config - skipping filtering\n');
+        fprintf('No time_locked_regions specified in config - skipping labeling\n');
         return;
     end
     
@@ -108,8 +108,8 @@ if ~isempty(varargin) && ischar(varargin{1}) && (endsWith(varargin{1}, '.m') || 
     
     conditions = get_config_value(config, 'conditions', []);
     items = get_config_value(config, 'items', []);
-    filterCount = get_config_value(config, 'filterCount', []);
-    filterDescription = get_config_value(config, 'filterDescription', '');
+    labelCount = get_config_value(config, 'labelCount', []);
+    labelDescription = get_config_value(config, 'labelDescription', '');
     
 else
     % Individual parameters method (original)
@@ -124,8 +124,8 @@ else
     addParameter(p, 'saccadeOutOptions', 1, @isnumeric);
     addParameter(p, 'conditions', [], @isnumeric);
     addParameter(p, 'items', [], @isnumeric);
-    addParameter(p, 'filterCount', [], @isnumeric);
-    addParameter(p, 'filterDescription', '', @ischar);
+    addParameter(p, 'labelCount', [], @isnumeric);
+    addParameter(p, 'labelDescription', '', @ischar);
     
     parse(p, EEG, varargin{:});
     
@@ -139,13 +139,13 @@ else
     saccadeOutOptions = p.Results.saccadeOutOptions;
     conditions = p.Results.conditions;
     items = p.Results.items;
-    filterCount = p.Results.filterCount;
-    filterDescription = p.Results.filterDescription;
+    labelCount = p.Results.labelCount;
+    labelDescription = p.Results.labelDescription;
 end
 
 % Validate input EEG structure
 if isempty(EEG)
-    error('filter_datasets_core requires a non-empty EEG dataset');
+    error('label_datasets_core requires a non-empty EEG dataset');
 end
 if ~isfield(EEG, 'event') || isempty(EEG.event)
     error('EEG data does not contain any events.');
@@ -157,14 +157,14 @@ if ~isfield(EEG, 'eyesort_field_names')
     error('EEG data does not contain field name information. Please process with the Text Interest Areas function first.');
 end
 
-% Initialize filter count if not provided
-if ~isfield(EEG, 'eyesort_filter_count')
-    EEG.eyesort_filter_count = 0;
+% Initialize label count if not provided
+if ~isfield(EEG, 'eyesort_label_count')
+EEG.eyesort_label_count = 0;
 end
 
-if isempty(filterCount)
-    EEG.eyesort_filter_count = EEG.eyesort_filter_count + 1;
-    filterCount = EEG.eyesort_filter_count;
+if isempty(labelCount)
+    EEG.eyesort_label_count = EEG.eyesort_label_count + 1;
+    labelCount = EEG.eyesort_label_count;
 end
 
 % Get event type field names from EEG structure
@@ -201,7 +201,7 @@ end
 
 % Validate that at least one time-locked region is specified
 if isempty(timeLockedRegions)
-    error('At least one time-locked region must be specified for filtering');
+    error('At least one time-locked region must be specified for labeling');
 end
 
 % Ensure timeLockedRegions is a cell array
@@ -211,34 +211,34 @@ elseif ~iscell(timeLockedRegions)
     error('timeLockedRegions must be a cell array of strings or a single string');
 end
 
-% Apply the filtering
+% Apply the labeling
 try
-    filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLockedRegions, ...
-                                         passOptions, prevRegions, nextRegions, ...
-                                         fixationOptions, saccadeInOptions, saccadeOutOptions, filterCount, ...
-                                         fixationType, fixationXField, saccadeType, ...
-                                         saccadeStartXField, saccadeEndXField, filterDescription);
+    labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedRegions, ...
+                                            passOptions, prevRegions, nextRegions, ...
+                                            fixationOptions, saccadeInOptions, saccadeOutOptions, labelCount, ...
+                                            fixationType, fixationXField, saccadeType, ...
+                                            saccadeStartXField, saccadeEndXField, labelDescription);
     
-    % Update filter count and descriptions
-    filteredEEG.eyesort_filter_count = filterCount;
-    if ~isfield(filteredEEG, 'eyesort_filter_descriptions')
-        filteredEEG.eyesort_filter_descriptions = {};
+    % Update label count and descriptions
+    labeledEEG.eyesort_label_count = labelCount;
+    if ~isfield(labeledEEG, 'eyesort_label_descriptions')
+        labeledEEG.eyesort_label_descriptions = {};
     end
     
-    % Build filter description structure
-    filterDesc = struct();
-    filterDesc.filter_number = filterCount;
-    filterDesc.filter_code = sprintf('%02d', filterCount);
-    filterDesc.regions = timeLockedRegions;
-    filterDesc.pass_options = passOptions;
-    filterDesc.prev_regions = prevRegions;
-    filterDesc.next_regions = nextRegions;
-    filterDesc.fixation_options = fixationOptions;
-    filterDesc.saccade_in_options = saccadeInOptions;
-    filterDesc.saccade_out_options = saccadeOutOptions;
-    filterDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
+    % Build label description structure
+    labelDesc = struct();
+    labelDesc.label_number = labelCount;
+    labelDesc.label_code = sprintf('%02d', labelCount);
+    labelDesc.regions = timeLockedRegions;
+    labelDesc.pass_options = passOptions;
+    labelDesc.prev_regions = prevRegions;
+    labelDesc.next_regions = nextRegions;
+    labelDesc.fixation_options = fixationOptions;
+    labelDesc.saccade_in_options = saccadeInOptions;
+    labelDesc.saccade_out_options = saccadeOutOptions;
+    labelDesc.timestamp = datestr(now, 'yyyy-mm-dd HH:MM:SS');
     
-    filteredEEG.eyesort_filter_descriptions{end+1} = filterDesc;
+    labeledEEG.eyesort_label_descriptions{end+1} = labelDesc;
     
     % Generate command string
     if iscell(timeLockedRegions)
@@ -251,42 +251,42 @@ try
     else
         regionStr = mat2str(timeLockedRegions);
     end
-    com = sprintf('EEG = filter_datasets_core(EEG, ''timeLockedRegions'', %s, ''filterCount'', %d);', ...
-                  regionStr, filterCount);
+    com = sprintf('EEG = label_datasets_core(EEG, ''timeLockedRegions'', %s, ''labelCount'', %d);', ...
+                regionStr, labelCount);
     
 catch ME
     % Provide more detailed error information
     if contains(ME.message, 'mat2str') || contains(ME.message, 'Input matrix must be')
-        error('Error in command string generation. This may be due to incompatible data types in filter parameters. Original error: %s', ME.message);
+        error('Error in command string generation. This may be due to incompatible data types in label parameters. Original error: %s', ME.message);
     else
-        error('Error applying filter: %s', ME.message);
+        error('Error applying label: %s', ME.message);
     end
 end
 
 end
 
-function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLockedRegions, ...
-                                              passOptions, prevRegions, nextRegions, ...
-                                              fixationOptions, saccadeInOptions, ...
-                                              saccadeOutOptions, filterCount, ...
-                                              fixationType, fixationXField, saccadeType, ...
-                                              saccadeStartXField, saccadeEndXField, filterDescription)
-    % Optimized internal filtering implementation with O(n) complexity
+function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedRegions, ...
+                                                passOptions, prevRegions, nextRegions, ...
+                                                fixationOptions, saccadeInOptions, ...
+                                                saccadeOutOptions, labelCount, ...
+                                                fixationType, fixationXField, saccadeType, ...
+                                                saccadeStartXField, saccadeEndXField, labelDescription)
+    % Optimized internal labeling implementation with O(n) complexity
     
     % Create a copy of the EEG structure
-    filteredEEG = EEG;
+    labeledEEG = EEG;
     
     % Create a tracking count for matched events
     matchedEventCount = 0;
     
-    % Ensure filter count is at least 1 for 1-indexed filter codes
-    if filterCount < 1
-        filterCount = 1;
+    % Ensure label count is at least 1 for 1-indexed label codes
+    if labelCount < 1
+        labelCount = 1;
     end
     
-    % Pre-compute the filter code (always 2 digits, 01-99)
-    filterCode = sprintf('%02d', filterCount);
-    fprintf('Filter code for this batch: %s\n', filterCode);
+    % Pre-compute the label code (always 2 digits, 01-99)
+    labelCode = sprintf('%02d', labelCount);
+    fprintf('Label code for this batch: %s\n', labelCode);
     
     % Create region code mapping - map region names to 2-digit codes
     regionCodeMap = containers.Map('KeyType', 'char', 'ValueType', 'char');
@@ -332,7 +332,7 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
     conflictingEvents = {};
     
     % ========== PERFORMANCE OPTIMIZATION: PRE-COMPUTE ALL INDICES ==========
-    fprintf('Pre-computing event indices for optimized filtering...\n');
+    fprintf('Pre-computing event indices for optimized labeling...\n');
     
     % Pre-extract all event fields for vectorized operations
     nEvents = length(EEG.event);
@@ -397,24 +397,14 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
     % Get fixation indices
     fixationIndices = find(isFixation);
     
-    % Pre-compute next region relationships (vectorized)
-    nextRegionMap = containers.Map('KeyType', 'int32', 'ValueType', 'any');
-    for i = 1:length(fixationIndices)
-        idx = fixationIndices(i);
-        currentReg = currentRegions{idx};
-        if isempty(currentReg), continue; end
-        
-        % Find next different region among remaining fixations
-        nextRegion = '';
-        for j = i+1:length(fixationIndices)
-            nextIdx = fixationIndices(j);
-            nextReg = currentRegions{nextIdx};
-            if ~isempty(nextReg) && ~strcmp(nextReg, currentReg)
-                nextRegion = nextReg;
-                break;
-            end
+    % Extract next region visited field for all events
+    nextRegionVisited = cell(nEvents, 1);
+    for i = 1:nEvents
+        if isfield(EEG.event(i), 'next_region_visited')
+            nextRegionVisited{i} = EEG.event(i).next_region_visited;
+        else
+            nextRegionVisited{i} = '';
         end
-        nextRegionMap(idx) = nextRegion;
     end
     
     % Pre-compute fixation groupings by trial/region/pass
@@ -471,18 +461,18 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
     
     fprintf('Pre-computation complete. Processing %d fixation events...\n', length(fixationIndices));
     
-    % ========== OPTIMIZED FILTERING LOOP ==========
+    % ========== OPTIMIZED LABELING LOOP ==========
     for i = 1:length(fixationIndices)
         mm = fixationIndices(i);
         evt = EEG.event(mm);
         
-        % Check basic filters first (fastest)
+        % Check basic labels first (fastest)
         % Check if this is a fixation event or a previously coded fixation event
         if ~isFixation(mm)
             continue;
         end
         
-        % Check for condition and item filters (vectorized)
+        % Check for condition and item labels (vectorized)
         if ~isempty(conditions) && conditionNumbers(mm) > 0
             if ~any(conditionNumbers(mm) == conditions)
                 continue;
@@ -495,14 +485,14 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             end
         end
         
-        % Time-locked region filter (vectorized)
+        % Time-locked region label (vectorized)
         if ~isempty(timeLockedRegions) && ~isempty(currentRegions{mm})
             if ~any(strcmp(currentRegions{mm}, timeLockedRegions))
                 continue;
             end
         end
         
-        % Pass index filtering (optimized)
+        % Pass index labeling (optimized)
         passesPassIndex = false;
         if isscalar(passOptions)
             if passOptions == 1
@@ -539,36 +529,38 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             continue;
         end
         
-        % Previous region filtering (optimized)
+        % Previous region labeling (optimized)
         if ~isempty(prevRegions)
             if isempty(lastRegionVisited{mm}) || ~any(strcmp(lastRegionVisited{mm}, prevRegions))
                 continue;
             end
         end
         
-        % Next region filtering (optimized with pre-computed map)
+        % Next region labeling (using pre-computed field)
         if ~isempty(nextRegions)
-            if ~isKey(nextRegionMap, mm)
-                continue;
-            end
-            nextReg = nextRegionMap(mm);
-            if isempty(nextReg) || ~any(strcmp(nextReg, nextRegions))
+            if isempty(nextRegionVisited{mm}) || ~any(strcmp(nextRegionVisited{mm}, nextRegions))
                 continue;
             end
         end
         
-        % Fixation type filtering (optimized with pre-computed groups)
+        % Fixation type labeling (optimized with pre-computed groups)
         passesFixationType = false;
         if isscalar(fixationOptions)
             if fixationOptions == 0
                 passesFixationType = true;
             elseif fixationOptions == 1
-                % Single fixation - check group size
-                if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
-                    key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
-                    if isKey(fixationGroups, key)
-                        groupIndices = fixationGroups(key);
-                        passesFixationType = (length(groupIndices) == 1);
+                % Single fixation - using next_fixation_region for efficiency
+                if isfield(EEG.event(mm), 'next_fixation_region') && fixationInPass(mm) == 1
+                    nextFixRegion = EEG.event(mm).next_fixation_region;
+                    passesFixationType = isempty(nextFixRegion) || ~strcmp(currentRegions{mm}, nextFixRegion);
+                else
+                    % Fallback to group-based check
+                    if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                        if isKey(fixationGroups, key)
+                            groupIndices = fixationGroups(key);
+                            passesFixationType = (length(groupIndices) == 1);
+                        end
                     end
                 end
             elseif fixationOptions == 2
@@ -585,13 +577,18 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             elseif fixationOptions == 4
                 passesFixationType = (fixationInPass(mm) > 2);
             elseif fixationOptions == 5
-                % Last in region
-                if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
-                    key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
-                    if isKey(fixationGroups, key)
-                        groupIndices = fixationGroups(key);
-                        maxFixInPass = max(fixationInPass(groupIndices));
-                        passesFixationType = (fixationInPass(mm) == maxFixInPass);
+                % Last in region (using pre-computed field)
+                if isfield(EEG.event(mm), 'is_last_in_pass')
+                    passesFixationType = EEG.event(mm).is_last_in_pass;
+                else
+                    % Fallback to expensive search if field not available
+                    if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                        if isKey(fixationGroups, key)
+                            groupIndices = fixationGroups(key);
+                            maxFixInPass = max(fixationInPass(groupIndices));
+                            passesFixationType = (fixationInPass(mm) == maxFixInPass);
+                        end
                     end
                 end
             else
@@ -602,13 +599,23 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                 passesFixationType = true;
             else
                 for opt = fixationOptions
-                    if opt == 1 && trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
-                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
-                        if isKey(fixationGroups, key)
-                            groupIndices = fixationGroups(key);
-                            if length(groupIndices) == 1
+                    if opt == 1
+                        % Single fixation - using next_fixation_region for efficiency
+                        if isfield(EEG.event(mm), 'next_fixation_region') && fixationInPass(mm) == 1
+                            nextFixRegion = EEG.event(mm).next_fixation_region;
+                            if isempty(nextFixRegion) || ~strcmp(currentRegions{mm}, nextFixRegion)
                                 passesFixationType = true;
                                 break;
+                            end
+                        elseif trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                            % Fallback to group-based check
+                            key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                            if isKey(fixationGroups, key)
+                                groupIndices = fixationGroups(key);
+                                if length(groupIndices) == 1
+                                    passesFixationType = true;
+                                    break;
+                                end
                             end
                         end
                     elseif opt == 2 && trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
@@ -626,14 +633,21 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
                     elseif opt == 4 && fixationInPass(mm) > 2
                         passesFixationType = true;
                         break;
-                    elseif opt == 5 && trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
-                        key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
-                        if isKey(fixationGroups, key)
-                            groupIndices = fixationGroups(key);
-                            maxFixInPass = max(fixationInPass(groupIndices));
-                            if fixationInPass(mm) == maxFixInPass
-                                passesFixationType = true;
-                                break;
+                    elseif opt == 5
+                        % Last in region (using pre-computed field)
+                        if isfield(EEG.event(mm), 'is_last_in_pass') && EEG.event(mm).is_last_in_pass
+                            passesFixationType = true;
+                            break;
+                        elseif trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
+                            % Fallback to expensive search if field not available
+                            key = sprintf('%d_%s_%d', trialNumbers(mm), currentRegions{mm}, regionPassNumbers(mm));
+                            if isKey(fixationGroups, key)
+                                groupIndices = fixationGroups(key);
+                                maxFixInPass = max(fixationInPass(groupIndices));
+                                if fixationInPass(mm) == maxFixInPass
+                                    passesFixationType = true;
+                                    break;
+                                end
                             end
                         end
                     end
@@ -645,7 +659,7 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             continue;
         end
         
-        % Saccade in direction filtering (optimized with pre-computed map)
+        % Saccade in direction labeling (optimized with pre-computed map)
         passesSaccadeInDirection = false;
         if isscalar(saccadeInOptions)
             if saccadeInOptions == 1
@@ -702,7 +716,7 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             continue;
         end
         
-        % Saccade out direction filtering (optimized with pre-computed map)
+        % Saccade out direction labeling (optimized with pre-computed map)
         passesSaccadeOutDirection = false;
         if isscalar(saccadeOutOptions)
             if saccadeOutOptions == 1
@@ -759,7 +773,7 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             continue;
         end
         
-        % If we reach here, the event passes all filters
+        % If we reach here, the event passes all labels
         matchedEventCount = matchedEventCount + 1;
         
         % Generate the 6-digit event code
@@ -777,12 +791,12 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
             regionStr = '00';
         end
         
-        filterStr = filterCode;
-        newType = sprintf('%s%s%s', condStr, regionStr, filterStr);
+        labelStr = labelCode;
+        newType = sprintf('%s%s%s', condStr, regionStr, labelStr);
         
         % Store the original type if this is the first time we're coding this event
         if ~isfield(evt, 'original_type')
-            filteredEEG.event(mm).original_type = evt.type;
+            labeledEEG.event(mm).original_type = evt.type;
         end
         
         % Check for existing code in the event
@@ -797,35 +811,35 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
         end
         
         % Update the event type and related fields
-        filteredEEG.event(mm).type = newType;
-        filteredEEG.event(mm).eyesort_condition_code = condStr;
-        filteredEEG.event(mm).eyesort_region_code = regionStr;
-        filteredEEG.event(mm).eyesort_filter_code = filterStr;
-        filteredEEG.event(mm).eyesort_full_code = newType;
+        labeledEEG.event(mm).type = newType;
+        labeledEEG.event(mm).eyesort_condition_code = condStr;
+        labeledEEG.event(mm).eyesort_region_code = regionStr;
+        labeledEEG.event(mm).eyesort_label_code = labelStr;
+        labeledEEG.event(mm).eyesort_full_code = newType;
         
-        % Add BDF description columns directly (only to filtered events to minimize 7.3 risk)
-        if ~isempty(filterDescription)
+        % Add BDF description columns directly (only to labeled events to minimize 7.3 risk)
+        if ~isempty(labelDescription)
             % Get condition description string from lookup
             conditionDesc = '';
-            if isfield(filteredEEG, 'eyesort_condition_descriptions') && ...
-               isfield(filteredEEG, 'eyesort_condition_lookup') && ...
+            if isfield(labeledEEG, 'eyesort_condition_descriptions') && ...
+               isfield(labeledEEG, 'eyesort_condition_lookup') && ...
                conditionNumbers(mm) > 0 && itemNumbers(mm) > 0
                 key = sprintf('%d_%d', conditionNumbers(mm), itemNumbers(mm));
                 validKey = matlab.lang.makeValidName(['k_' key]);
-                condStruct = filteredEEG.eyesort_condition_descriptions;
+                condStruct = labeledEEG.eyesort_condition_descriptions;
                 if isfield(condStruct, validKey)
                     conditionNum = condStruct.(validKey); % This is numeric
                     % Convert back to string using lookup
-                    if isKey(filteredEEG.eyesort_condition_lookup, num2str(conditionNum))
-                        conditionDesc = filteredEEG.eyesort_condition_lookup(num2str(conditionNum));
+                    if isKey(labeledEEG.eyesort_condition_lookup, num2str(conditionNum))
+                        conditionDesc = labeledEEG.eyesort_condition_lookup(num2str(conditionNum));
                     end
                 end
             end
             
-            % Store actual strings in dataset (only on filtered events)
-            filteredEEG.event(mm).bdf_condition_description = char(conditionDesc);
-            filteredEEG.event(mm).bdf_filter_description = char(filterDescription);
-            filteredEEG.event(mm).bdf_full_description = strcat(char(conditionDesc), '_', char(filterDescription));
+            % Store actual strings in dataset (only on labeled events)
+            labeledEEG.event(mm).bdf_condition_description = char(conditionDesc);
+            labeledEEG.event(mm).bdf_label_description = char(labelDescription);
+            labeledEEG.event(mm).bdf_full_description = strcat(char(conditionDesc), '_', char(labelDescription));
         end
     end
     
@@ -835,18 +849,18 @@ function filteredEEG = filter_dataset_internal(EEG, conditions, items, timeLocke
         
         fprintf('Warning: Found %d events with conflicting codes (%.1f%% of matched events).\n', ...
                 length(conflictingEvents), conflictPercentage);
-        fprintf('These events match multiple filter criteria.\n');
+        fprintf('These events match multiple label criteria.\n');
         fprintf('Keeping new codes by default. Use GUI for interactive conflict resolution.\n');
     end
     
     % Store the number of matched events for reference
-    filteredEEG.eyesort_last_filter_matched_count = matchedEventCount;
+    labeledEEG.eyesort_last_label_matched_count = matchedEventCount;
     
     % Display results
     if matchedEventCount == 0
-        fprintf('Warning: No events matched your filter criteria!\n');
+        fprintf('Warning: No events matched your label criteria!\n');
     else
-        fprintf('Filter applied successfully! Identified %d events matching filter criteria.\n', matchedEventCount);
+        fprintf('Label applied successfully! Identified %d events matching label criteria.\n', matchedEventCount);
     end
     
 end

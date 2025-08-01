@@ -65,6 +65,10 @@ function EEG = compute_text_based_ia(EEG, varargin)
             end
             conditionColName = config.conditionColName;
             conditionTypeColName = config.conditionTypeColName;
+            % Parse comma-separated condition type column names
+            if ischar(conditionTypeColName)
+                conditionTypeColName = strtrim(strsplit(conditionTypeColName, ','));
+            end
             itemColName = config.itemColName;
             startCode = config.startCode;
             endCode = config.endCode;
@@ -343,8 +347,23 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
             regionWordsMap(key) = regionWords;
             
             % Store condition description for BDF generation
-            condDesc = data.(conditionTypeColName)(iRow);
-            if iscell(condDesc), condDesc = condDesc{1}; end
+            % Handle multiple condition columns (comma-separated)
+            if iscell(conditionTypeColName)
+                conditionColNames = conditionTypeColName;
+            else
+                conditionColNames = {conditionTypeColName};
+            end
+            
+            condDescParts = {};
+            for colIdx = 1:length(conditionColNames)
+                colName = conditionColNames{colIdx};
+                if isfield(data, colName)
+                    colVal = data.(colName)(iRow);
+                    if iscell(colVal), colVal = colVal{1}; end
+                    condDescParts{end+1} = char(string(colVal));
+                end
+            end
+            condDesc = strjoin(condDescParts, '_');
             % Get condition number for numeric storage
             conditionNum = data.(conditionColName)(iRow);
             if iscell(conditionNum), conditionNum = conditionNum{1}; end
@@ -554,7 +573,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     % Store the region names for use by other functions
     EEG.region_names = regionNames;
     
-    % Store condition description struct for BDF generation during filtering
+    % Store condition description struct for BDF generation during labeling
     EEG.eyesort_condition_descriptions = conditionDescMap;
     EEG.eyesort_condition_lookup = conditionDescLookup;
 
@@ -572,7 +591,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
         EEG.filepath = '';
     end
     
-    fprintf('\nProcessing complete! You can now filter the dataset using the Filter Datasets option in the EyeSort menu.\n');
+    fprintf('\nProcessing complete! You can now Label the dataset using the Label Datasets option in the EyeSort menu.\n');
 end
 
 %% Helper function: findBestColumnMatch

@@ -1,5 +1,5 @@
-function [processed_count, com] = batch_filter_utils(action, varargin)
-% BATCH_FILTER_UTILS - Utility functions for batch filtering operations
+function [processed_count, com] = batch_label_utils(action, varargin)
+% BATCH_LABEL_UTILS - Utility functions for batch labeling operations
 %
 % Usage:
 %   [processed_count, com] = batch_filter_utils('apply', batchFilePaths, batchFilenames, outputDir, filter_config)
@@ -25,11 +25,11 @@ processed_count = 0;
 failed_files = {};
 
 % Create progress bar
-h = waitbar(0, 'Applying filters to all datasets...', 'Name', 'Batch Filtering');
+h = waitbar(0, 'Applying labels to all datasets...', 'Name', 'Batch Labeling');
 
 try
     for i = 1:length(batchFilePaths)
-        waitbar(i/length(batchFilePaths), h, sprintf('Filtering dataset %d of %d: %s', i, length(batchFilePaths), batchFilenames{i}));
+        waitbar(i/length(batchFilePaths), h, sprintf('Labeling dataset %d of %d: %s', i, length(batchFilePaths), batchFilenames{i}));
         
         try
             % Load dataset from file
@@ -43,23 +43,23 @@ try
             end
             
             % Convert configuration to filter parameters
-            filter_params = convert_config_to_params(filter_config);
+            label_params = convert_config_to_params(filter_config);
             
             % Apply the filter using the core function
-            [filteredEEG, ~] = filter_datasets_core(currentEEG, filter_params{:});
+            [labeledEEG, ~] = label_datasets_core(currentEEG, label_params{:});
             
             % Save the processed dataset
             [~, fileName, ~] = fileparts(batchFilenames{i});
             output_path = fullfile(outputDir, [fileName '_eyesort_filtered.set']);
             
             % Save with both .set and .fdt files
-            pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'twofiles');
+            pop_saveset(labeledEEG, 'filename', output_path, 'savemode', 'twofiles');
             
             processed_count = processed_count + 1;
             fprintf('Successfully filtered: %s\n', batchFilenames{i});
             
             % Clear dataset from memory to avoid accumulation
-            clear currentEEG filteredEEG;
+            clear currentEEG labeledEEG;
             
         catch ME
             warning('Failed to filter dataset %s: %s', batchFilenames{i}, ME.message);
@@ -72,13 +72,13 @@ try
     
     % Show detailed results if there were failures
     if ~isempty(failed_files)
-        warning_msg = sprintf('Batch filtering completed with some failures:\n\nSuccessful: %d\nFailed: %d\n\nFailed files:\n%s', ...
+        warning_msg = sprintf('Batch labeling completed with some failures:\n\nSuccessful: %d\nFailed: %d\n\nFailed files:\n%s', ...
                             processed_count, length(failed_files), strjoin(failed_files, '\n'));
-        msgbox(warning_msg, 'Batch Filtering Results', 'warn');
+        msgbox(warning_msg, 'Batch Labeling Results', 'warn');
     end
     
     % Build command string for history
-    com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtered %d datasets', processed_count);
+    com = sprintf('EEG = pop_label_datasets(EEG); %% Batch labeled %d datasets', processed_count);
     
 catch ME
     % Close progress bar if there was an error
@@ -90,15 +90,15 @@ end
 
 end
 
-function filter_params = convert_config_to_params(config)
+function label_params = convert_config_to_params(config)
 % Convert GUI configuration structure to parameter list for core function
 
-filter_params = {};
+label_params = {};
 
 % Time-locked regions
 if isfield(config, 'selectedRegions') && ~isempty(config.selectedRegions)
-    filter_params{end+1} = 'timeLockedRegions';
-    filter_params{end+1} = config.selectedRegions;
+    label_params{end+1} = 'timeLockedRegions';
+    label_params{end+1} = config.selectedRegions;
 end
 
 % Pass options
@@ -115,19 +115,19 @@ end
 if isempty(passOptions)
     passOptions = 1;
 end
-filter_params{end+1} = 'passOptions';
-filter_params{end+1} = passOptions;
+label_params{end+1} = 'passOptions';
+label_params{end+1} = passOptions;
 
 % Previous regions
 if isfield(config, 'selectedPrevRegions') && ~isempty(config.selectedPrevRegions)
-    filter_params{end+1} = 'prevRegions';
-    filter_params{end+1} = config.selectedPrevRegions;
+    label_params{end+1} = 'prevRegions';
+    label_params{end+1} = config.selectedPrevRegions;
 end
 
 % Next regions
 if isfield(config, 'selectedNextRegions') && ~isempty(config.selectedNextRegions)
-    filter_params{end+1} = 'nextRegions';
-    filter_params{end+1} = config.selectedNextRegions;
+    label_params{end+1} = 'nextRegions';
+    label_params{end+1} = config.selectedNextRegions;
 end
 
 % Fixation options
@@ -150,8 +150,8 @@ end
 if isempty(fixationOptions)
     fixationOptions = 1;
 end
-filter_params{end+1} = 'fixationOptions';
-filter_params{end+1} = fixationOptions;
+label_params{end+1} = 'fixationOptions';
+label_params{end+1} = fixationOptions;
 
 % Saccade in options
 saccadeInOptions = [];
@@ -164,8 +164,8 @@ end
 if isempty(saccadeInOptions)
     saccadeInOptions = 1;
 end
-filter_params{end+1} = 'saccadeInOptions';
-filter_params{end+1} = saccadeInOptions;
+label_params{end+1} = 'saccadeInOptions';
+label_params{end+1} = saccadeInOptions;
 
 % Saccade out options
 saccadeOutOptions = [];
@@ -178,8 +178,8 @@ end
 if isempty(saccadeOutOptions)
     saccadeOutOptions = 1;
 end
-filter_params{end+1} = 'saccadeOutOptions';
-filter_params{end+1} = saccadeOutOptions;
+label_params{end+1} = 'saccadeOutOptions';
+label_params{end+1} = saccadeOutOptions;
 
 end
 

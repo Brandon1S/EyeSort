@@ -5,17 +5,17 @@ function [EEG, com] = pop_generate_bdf(EEG)
 %   >> [EEG, com] = pop_generate_bdf(EEG);
 %
 % Inputs:
-%   EEG   - EEGLAB EEG structure or ALLEEG array with filtered events
+%   EEG   - EEGLAB EEG structure or ALLEEG array with labeled events
 %
 % Outputs:
 %   EEG   - Same as input EEG
 %   com   - Command string for EEGLAB history
 %
 % This function presents a GUI to create a BINLISTER Bin Descriptor File (BDF)
-% from filtered events in EEG datasets. The BDF file can then be used with 
+% from labeled events in EEG datasets. The BDF file can then be used with 
 % EEGLAB's BINLISTER function for further processing.
 %
-% See also: generate_bdf_file, pop_filter_datasets
+% See also: generate_bdf_file, pop_label_datasets
 
     % Initialize output
     com = '';
@@ -36,26 +36,26 @@ function [EEG, com] = pop_generate_bdf(EEG)
     
     % Validate input
     if isempty(EEG)
-        errordlg('EEG dataset is empty. Please load filtered datasets first.', 'Error');
+        errordlg('EEG dataset is empty. Please load Labeled datasets first.', 'Error');
         return;
     end
     
-    % Check if EEG is filtered
-    hasFilteredEvents = false;
+    % Check if EEG is labeled
+    hasLabeledEvents = false;
     
     if length(EEG) > 1
         % Check multiple datasets
         for i = 1:length(EEG)
             if ~isempty(EEG(i)) && isfield(EEG(i), 'event') && ~isempty(EEG(i).event)
-                % Check for 6-digit event codes (filtered events)
+                % Check for 6-digit event codes (labeled events)
                 for j = 1:length(EEG(i).event)
                     if isfield(EEG(i).event(j), 'type') && ischar(EEG(i).event(j).type) && ...
                             length(EEG(i).event(j).type) == 6 && all(isstrprop(EEG(i).event(j).type, 'digit'))
-                        hasFilteredEvents = true;
+                        hasLabeledEvents = true;
                         break;
                     end
                 end
-                if hasFilteredEvents
+                if hasLabeledEvents
                     break;
                 end
             end
@@ -66,15 +66,15 @@ function [EEG, com] = pop_generate_bdf(EEG)
             for i = 1:length(EEG.event)
                 if isfield(EEG.event(i), 'type') && ischar(EEG.event(i).type) && ...
                         length(EEG.event(i).type) == 6 && all(isstrprop(EEG.event(i).type, 'digit'))
-                    hasFilteredEvents = true;
+                    hasLabeledEvents = true;
                     break;
                 end
             end
         end
     end
     
-    if ~hasFilteredEvents
-        errordlg('No filtered events found in the dataset(s). Please run filtering first.', 'Error');
+    if ~hasLabeledEvents
+        errordlg('No labeled events found in the dataset(s). Please run labeling first.', 'Error');
         return;
     end
     
@@ -96,7 +96,7 @@ function [EEG, com] = pop_generate_bdf(EEG)
           
     % Description text
     uicontrol('Style', 'text', ...
-              'String', ['This will analyze the 6-digit filter codes in your filtered datasets ' ...
+              'String', ['This will analyze the 6-digit label codes in your labeled datasets ' ...
                          'and create a BINLISTER compatible bin descriptor file (BDF).' char(10) ...
                          'The BDF can be used with BINLISTER for further analysis.'], ...
               'Position', [20 130 410 60], ...
@@ -104,9 +104,9 @@ function [EEG, com] = pop_generate_bdf(EEG)
     
     % Dataset info text
     if length(EEG) > 1
-        datasetText = sprintf('Analyzing %d filtered datasets', length(EEG));
+        datasetText = sprintf('Analyzing %d labeled datasets', length(EEG));
     else
-        datasetText = 'Analyzing current filtered dataset';
+        datasetText = 'Analyzing current labeled dataset';
     end
     
     uicontrol('Style', 'text', ...

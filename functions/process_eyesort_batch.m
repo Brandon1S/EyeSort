@@ -35,7 +35,7 @@ function process_eyesort_batch(datasetFolder, varargin)
 %   'saccade_start_x_field'- Field name for saccade start X position
 %   'saccade_end_x_field'  - Field name for saccade end X position
 %   
-%   Parameters for filter_datasets_core:
+%   Parameters for label_datasets_core:
 %   'time_locked_regions'  - Cell array of regions to filter on
 %   'pass_options'         - Pass type options (1=any, 2=first, 3=second, etc.)
 %   'prev_regions'         - Cell array of previous region names
@@ -194,7 +194,7 @@ for i = 1:length(datasetFiles)
                 filter_args = [filter_args, {'items', config.items}];
             end
             
-            [EEG, ~] = filter_datasets_core(EEG, filter_args{:});
+            [EEG, ~] = label_datasets_core(EEG, filter_args{:});
         else
             fprintf('Step 3: Skipping filters (no time_locked_regions specified)\n');
         end

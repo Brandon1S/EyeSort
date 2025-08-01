@@ -1,11 +1,11 @@
-function save_all_filtered_datasets
-% SAVE_ALL_FILTERED_DATASETS - Saves filtered datasets using standard save dialog
+function save_all_labeled_datasets
+% SAVE_ALL_LABELED_DATASETS - Saves labeled datasets using standard save dialog
 %
-% This function identifies filtered datasets in the EEGLAB EEG and ALLEEG structures
+% This function identifies labeled datasets in the EEGLAB EEG and ALLEEG structures
 % and allows users to save them through the standard EEGLAB save dialog.
 %
 % Usage:
-%   >> save_all_filtered_datasets;
+%   >> save_all_labeled_datasets;
 %
 % Inputs:
 %   None - retrieves EEG and ALLEEG from the base workspace
@@ -13,7 +13,7 @@ function save_all_filtered_datasets
 % Outputs:
 %   None - saves datasets to disk
 %
-% See also: pop_filter_datasets, pop_saveset
+% See also: pop_label_datasets, pop_saveset
 
     % Initialize datasets to save
     datasetsToSave = {};
@@ -23,8 +23,8 @@ function save_all_filtered_datasets
     try
         EEG = evalin('base', 'EEG');
         if ~isempty(EEG) && isfield(EEG, 'event') && ~isempty(EEG.event)
-            % Check if this dataset has been filtered
-            if isFilteredDataset(EEG)
+            % Check if this dataset has been labeled
+            if isLabeledDataset(EEG)
                 datasetsToSave{end+1} = EEG;
                 % Create a label for the dataset
                 if isfield(EEG, 'setname') && ~isempty(EEG.setname)
@@ -40,14 +40,14 @@ function save_all_filtered_datasets
         % If EEG isn't available, continue checking ALLEEG
     end
     
-    % Then check ALLEEG for additional filtered datasets
+    % Then check ALLEEG for additional labeled datasets
     try
         ALLEEG = evalin('base', 'ALLEEG');
         if ~isempty(ALLEEG)
             for i = 1:length(ALLEEG)
                 if ~isempty(ALLEEG(i)) && isfield(ALLEEG(i), 'event') && ~isempty(ALLEEG(i).event)
-                    % Check if this dataset has been filtered
-                    if isFilteredDataset(ALLEEG(i))
+                    % Check if this dataset has been labeled
+                    if isLabeledDataset(ALLEEG(i))
                         datasetsToSave{end+1} = ALLEEG(i);
                         % Create a label for the dataset
                         if isfield(ALLEEG(i), 'setname') && ~isempty(ALLEEG(i).setname)
@@ -65,9 +65,9 @@ function save_all_filtered_datasets
         % If ALLEEG isn't available, continue with whatever we found in EEG
     end
     
-    % Check if we found any filtered datasets
+    % Check if we found any labeled datasets
     if isempty(datasetsToSave)
-        msgbox('No filtered datasets found. Please run filtering first.', 'No Datasets');
+        msgbox('No labeled datasets found. Please run labeling first.', 'No Datasets');
         return;
     end
     
@@ -77,7 +77,7 @@ function save_all_filtered_datasets
         [selectedIndex, ok] = listdlg('PromptString', 'Select dataset to save:', ...
                                     'SelectionMode', 'single', ...
                                     'ListString', datasetLabels, ...
-                                    'Name', 'Save Filtered Dataset');
+                                    'Name', 'Save Labeled Dataset');
         if ~ok || isempty(selectedIndex)
             % User cancelled
             return;
@@ -87,22 +87,22 @@ function save_all_filtered_datasets
     % Get the selected dataset
     selectedEEG = datasetsToSave{selectedIndex};
     
-    % Add filter info to setname if it exists
-    if isfield(selectedEEG, 'eyesort_filter_descriptions') && ~isempty(selectedEEG.eyesort_filter_descriptions)
-        % Get the filter code from the last filter description
-        filterDescs = selectedEEG.eyesort_filter_descriptions;
-        filterCode = filterDescs{end}.filter_code;
+    % Add label info to setname if it exists
+    if isfield(selectedEEG, 'eyesort_label_descriptions') && ~isempty(selectedEEG.eyesort_label_descriptions)
+        % Get the label code from the last label description
+        labelDescs = selectedEEG.eyesort_label_descriptions;
+        labelCode = labelDescs{end}.label_code;
         
-        % Add filter code to setname if it doesn't already have it
+        % Add label code to setname if it doesn't already have it
         if isfield(selectedEEG, 'setname') && ~isempty(selectedEEG.setname)
-            if ~contains(selectedEEG.setname, ['filtered_' filterCode])
-                selectedEEG.setname = [selectedEEG.setname '_filtered_' filterCode];
+            if ~contains(selectedEEG.setname, ['labeled_' labelCode])
+                selectedEEG.setname = [selectedEEG.setname '_labeled_' labelCode];
             end
         end
     end
     
     % Show save dialog for the dataset
-    fprintf('Please save the filtered dataset...\n');
+    fprintf('Please save the labeled dataset...\n');
     try
         % Get the original filename and filepath if available
         saveFilename = '';
@@ -110,11 +110,11 @@ function save_all_filtered_datasets
         
         if isfield(selectedEEG, 'filename') && ~isempty(selectedEEG.filename)
             [filepath, baseName, ~] = fileparts(selectedEEG.filename);
-            if isfield(selectedEEG, 'eyesort_filter_descriptions') && ~isempty(selectedEEG.eyesort_filter_descriptions)
-                filterCode = selectedEEG.eyesort_filter_descriptions{end}.filter_code;
-                saveFilename = [baseName '_filtered_' filterCode '.set'];
+            if isfield(selectedEEG, 'eyesort_label_descriptions') && ~isempty(selectedEEG.eyesort_label_descriptions)
+                labelCode = selectedEEG.eyesort_label_descriptions{end}.label_code;
+                saveFilename = [baseName '_labeled_' labelCode '.set'];
             else
-                saveFilename = [baseName '_filtered.set'];
+                saveFilename = [baseName '_labeled.set'];
             end
             
             % Use dataset filepath if available, otherwise current directory
@@ -127,11 +127,17 @@ function save_all_filtered_datasets
         
         % If there's no filename yet, use direct UI approach
         if isempty(saveFilename)
-            [selectedEEG, cancelFlag] = pop_saveset(selectedEEG);
+            selectedEEG = pop_saveset(selectedEEG);
+            % Check if save was successful by verifying filename was set
+            if isfield(selectedEEG, 'filename') && ~isempty(selectedEEG.filename)
+                fprintf('Dataset saved successfully.\n');
+            else
+                fprintf('Save cancelled by user.\n');
+            end
         else
             % Use direct file picking approach to show the UI with the 
             % correct default filename - this works around limitations in pop_saveset
-            [filename, filepath, filterindex] = uiputfile({'*.set','EEGLAB Dataset file (*.set)'},...
+            [filename, filepath, labelindex] = uiputfile({'*.set','EEGLAB Dataset file (*.set)'},...
                 'Save dataset with .set extension', fullfile(savePath, saveFilename));
             
             if filename ~= 0
@@ -140,17 +146,12 @@ function save_all_filtered_datasets
                 selectedEEG.filepath = filepath;
                 
                 % Now save the dataset with the chosen filename
-                [selectedEEG, cancelFlag] = pop_saveset(selectedEEG, 'filename', filename, 'filepath', filepath, 'savemode', 'twofiles');
+                selectedEEG = pop_saveset(selectedEEG, 'filename', filename, 'filepath', filepath, 'savemode', 'twofiles');
+                fprintf('Dataset saved successfully.\n');
             else
                 % User cancelled
-                cancelFlag = 1;
+                fprintf('Save cancelled by user.\n');
             end
-        end
-        
-        if ~cancelFlag
-            fprintf('Dataset saved successfully.\n');
-        else
-            fprintf('Save cancelled by user.\n');
         end
     catch ME
         errordlg(['Error during save: ' ME.message], 'Save Failed');
@@ -158,18 +159,18 @@ function save_all_filtered_datasets
     end
 end
 
-% Helper function to check if a dataset has been filtered
-function result = isFilteredDataset(EEG)
+% Helper function to check if a dataset has been labeled
+function result = isLabeledDataset(EEG)
     result = false;
     
-    % Method 1: Check for eyesort_filter_descriptions field (ideal case)
-    if isfield(EEG, 'eyesort_filter_descriptions') && ~isempty(EEG.eyesort_filter_descriptions)
+    % Method 1: Check for eyesort_label_descriptions field (ideal case)
+    if isfield(EEG, 'eyesort_label_descriptions') && ~isempty(EEG.eyesort_label_descriptions)
         result = true;
         return;
     end
     
-    % Method 2: Check for eyesort_filter_count field
-    if isfield(EEG, 'eyesort_filter_count') && EEG.eyesort_filter_count > 0
+    % Method 2: Check for eyesort_label_count field
+    if isfield(EEG, 'eyesort_label_count') && EEG.eyesort_label_count > 0
         result = true;
         return;
     end

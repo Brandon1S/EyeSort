@@ -64,11 +64,13 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
 
     % Initialize new fields for all events
     [EEG.event.current_region] = deal('');
-    [EEG.event.previous_region] = deal('');
+    [EEG.event.previous_fixation_region] = deal('');
+    [EEG.event.next_fixation_region] = deal('');
     [EEG.event.last_region_visited] = deal('');  % New: tracks the actual last region visited (different from previousRegion which tracks the previous fixation)
     [EEG.event.next_region_visited] = deal('');  % New: tracks the next different region that will be visited after this fixation
     [EEG.event.region_pass_number] = deal(0);       % New: which pass through this region (1st, 2nd, etc.)
     [EEG.event.fixation_in_pass] = deal(0);         % New: which fixation in the current pass (1st, 2nd, etc.)
+    [EEG.event.is_last_in_pass] = deal(false);      % New: pre-computed flag for last fixation in pass
     [EEG.event.current_word] = deal('');
     [EEG.event.previous_word] = deal('');
     [EEG.event.is_first_pass_region] = deal(false);
@@ -252,7 +254,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                         
                         % Update region-related fields
                         EEG.event(iEvt).current_region = regionName;
-                        EEG.event(iEvt).previous_region = previousRegion;
+                        EEG.event(iEvt).previous_fixation_region = previousRegion;
                         
                         % Update region fixation counts (using region number as key)
                         if ~isKey(regionFixationCounts, regionKey)
@@ -424,37 +426,63 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
         end
     end
     
-    % Second pass to compute next_region_visited field - this requires knowing all future fixations
-    fprintf('Computing next_region_visited field...\n');
+    % Optimized single pass to compute both next_region_visited and next_fixation_region fields
+    fprintf('Computing next_region_visited and next_fixation_region fields...\n');
     for iTrial = 1:max([EEG.event.trial_number])
-        % Get all fixation events for this trial
+        % Get all fixation events for this trial (compute once per trial)
         trialFixations = find([EEG.event.trial_number] == iTrial & startsWith({EEG.event.type}, fixationType));
+        numFixations = length(trialFixations);
         
-        % Process each fixation in the trial
-        for iFixIdx = 1:length(trialFixations)
+        if numFixations == 0
+            continue;
+        end
+        
+        % Pre-extract all regions for this trial to avoid repeated field access
+        regions = cell(numFixations, 1);
+        for i = 1:numFixations
+            regions{i} = EEG.event(trialFixations(i)).current_region;
+        end
+        
+        % Compute both fields efficiently in single loop
+        for iFixIdx = 1:numFixations
             iEvt = trialFixations(iFixIdx);
-            currentRegion = EEG.event(iEvt).current_region;
+            currentRegion = regions{iFixIdx};
             
-            % Look ahead to find the next fixation in a different region
-            nextDifferentRegion = '';
-            
-            % Search forward through remaining fixations in this trial
-            for jFixIdx = iFixIdx+1:length(trialFixations)
-                jEvt = trialFixations(jFixIdx);
-                nextRegion = EEG.event(jEvt).current_region;
-                
-                % Found a fixation in a different region
-                if ~strcmp(nextRegion, currentRegion) && ~isempty(nextRegion)
-                    nextDifferentRegion = nextRegion;
-                    break;
-                end
+            % Set next_fixation_region (immediate next fixation)
+            if iFixIdx < numFixations
+                EEG.event(iEvt).next_fixation_region = regions{iFixIdx+1};
+            else
+                EEG.event(iEvt).next_fixation_region = '';
             end
             
-            % Store the next different region
+            % Set next_region_visited (next different region) with early termination
+            nextDifferentRegion = '';
+            for jFixIdx = iFixIdx+1:numFixations
+                if ~strcmp(regions{jFixIdx}, currentRegion) && ~isempty(regions{jFixIdx})
+                    nextDifferentRegion = regions{jFixIdx};
+                    break;  % Early termination - stops at first different region
+                end
+            end
             EEG.event(iEvt).next_region_visited = nextDifferentRegion;
         end
     end
-    fprintf('Done computing next_region_visited field.\n');
+    fprintf('Done computing next_region_visited and next_fixation_region fields.\n');
+    
+    % Fourth pass: Use next_fixation_region to pre-compute is_last_in_pass
+    fprintf('Computing is_last_in_pass field using next_fixation_region...\n');
+    for iTrial = 1:max([EEG.event.trial_number])
+        trialFixations = find([EEG.event.trial_number] == iTrial & startsWith({EEG.event.type}, fixationType));
+        
+        for i = 1:length(trialFixations)
+            iEvt = trialFixations(i);
+            currentRegion = EEG.event(iEvt).current_region;
+            nextFixRegion = EEG.event(iEvt).next_fixation_region;
+            
+            % Last in pass if: next fixation is in different region OR no next fixation
+            EEG.event(iEvt).is_last_in_pass = isempty(nextFixRegion) || ~strcmp(currentRegion, nextFixRegion);
+        end
+    end
+    fprintf('Done computing is_last_in_pass field.\n');
 end
 
 % Parses word region identifiers into region number and word number

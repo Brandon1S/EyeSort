@@ -7,11 +7,11 @@
 datasetFolder = '/Users/brandon/Datasets/Electric_Datasets_Small';
 config_file = '/Users/brandon/Datasets/electric_eyel_config.mat';  % UPDATE THIS PATH
 
-% Optional: separate filter config file (leave empty to skip filtering)
+% Optional: separate label config file (leave empty to skip labeling)
 filter_config_file = '/Users/brandon/Datasets/electric_eyel_filters.mat';  % e.g., '/path/to/filter_config.m' or leave empty
 
-% Optional: save intermediate datasets after text IA processing (before filtering)
-save_intermediate = true;  % Set to true to save datasets with boundaries/labeling but no filtering
+% Optional: save intermediate datasets after text IA processing (before labeling)
+save_intermediate = true;  % Set to true to save datasets with boundaries/labeling but no labeling
 
 % Find datasets
 datasetFiles = dir(fullfile(datasetFolder, '*.set'));
@@ -33,7 +33,7 @@ for i = 1:length(datasetFiles)
         % Step 1: Compute interest areas (includes trial labeling)
         EEG = compute_text_based_ia(EEG, config_file);
         
-        % Optional: Save intermediate dataset (after IA processing, before filtering)
+        % Optional: Save intermediate dataset (after IA processing, before labeling)
         if save_intermediate
             [~, name, ~] = fileparts(datasetFiles(i).name);
             intermediatePath = fullfile(datasetFolder, [name '_eyesort_ia.set']);
@@ -43,10 +43,10 @@ for i = 1:length(datasetFiles)
         
         % Step 2: Apply filters (if specified)
         if ~isempty(filter_config_file)
-            EEG = filter_datasets_core(EEG, filter_config_file);
+            EEG = label_datasets_core(EEG, filter_config_file);
         else
-            % Try to use same config file for filtering (will skip if no filtering params)
-            EEG = filter_datasets_core(EEG, config_file);
+            % Try to use same config file for labeling (will skip if no labeling params)
+            EEG = label_datasets_core(EEG, config_file);
         end
         
         % Save processed dataset

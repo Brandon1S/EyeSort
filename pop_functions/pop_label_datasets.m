@@ -1,7 +1,7 @@
-function [EEG, com] = pop_filter_datasets(EEG)
+function [EEG, com] = pop_label_datasets(EEG)
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %    FILTER DATASETS GUI      %
+    %    LABEL DATASETS GUI      %
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     % Initialize output
@@ -13,10 +13,10 @@ function [EEG, com] = pop_filter_datasets(EEG)
     batchFilenames = {};
     outputDir = '';
     
-    % Track current filter number for batch processing
-    persistent current_batch_filter_count;
-    if isempty(current_batch_filter_count)
-        current_batch_filter_count = 0;
+    % Track current label number for batch processing
+    persistent current_batch_label_count;
+    if isempty(current_batch_label_count)
+        current_batch_label_count = 0;
     end
     
     try
@@ -25,23 +25,23 @@ function [EEG, com] = pop_filter_datasets(EEG)
             batchFilePaths = evalin('base', 'eyesort_batch_file_paths');
             batchFilenames = evalin('base', 'eyesort_batch_filenames');
             outputDir = evalin('base', 'eyesort_batch_output_dir');
-            fprintf('Batch mode detected: %d datasets ready for filtering\n', length(batchFilePaths));
+            fprintf('Batch mode detected: %d datasets ready for labeling\n', length(batchFilePaths));
             
-            % Reset filter count when starting new batch session
-            if current_batch_filter_count == 0
-                current_batch_filter_count = 0;
+            % Reset label count when starting new batch session
+            if current_batch_label_count == 0
+                current_batch_label_count = 0;
             end
         end
     catch
         % Not in batch mode, continue with single dataset
-        current_batch_filter_count = 0;
+        current_batch_label_count = 0;
     end
     
     % If no EEG input, try to get it from base workspace
     if nargin < 1
         try
             if batch_mode
-            EEG = pop_loadset('filename', batchFilePaths{1}); % Load first dataset as reference
+                EEG = pop_loadset('filename', batchFilePaths{1}); % Load first dataset as reference
             
             else
                 EEG = evalin('base', 'EEG');
@@ -57,7 +57,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     
     % Validate input
     if isempty(EEG)
-        error('pop_filter_datasets requires a non-empty EEG dataset');
+        error('pop_label_datasets requires a non-empty EEG dataset');
     end
     if ~isfield(EEG, 'event') || isempty(EEG.event)
         errordlg('EEG data does not contain any events.', 'Error');
@@ -67,9 +67,9 @@ function [EEG, com] = pop_filter_datasets(EEG)
         errordlg('EEG data is not properly processed with region information. Please process with the Text Interest Areas function first.', 'Error');
         return;
     end
-    if ~isfield(EEG, 'eyesort_filter_count')
-        % Initialize filter count to 0, so first filter will be 01
-        EEG.eyesort_filter_count = 0;
+    if ~isfield(EEG, 'eyesort_label_count')
+        % Initialize label count to 0, so first label will be 01
+        EEG.eyesort_label_count = 0;
     end
     
     % Get event type field names from EEG structure - these must exist
@@ -78,7 +78,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
         return;
     end
     
-    % Extract available filtering options from EEG events
+    % Extract available labeling options from EEG events
     conditionSet = [];
     itemSet = [];
     
@@ -143,11 +143,11 @@ function [EEG, com] = pop_filter_datasets(EEG)
     
     % In batch mode, go directly to GUI - user can load last config if desired
     if batch_mode
-        fprintf('Batch mode: %d datasets ready. Use "Load Last Filter Config" to reuse previous settings.\n', length(batchFilePaths));
+        fprintf('Batch mode: %d datasets ready. Use "Load Last Label Config" to reuse previous settings.\n', length(batchFilePaths));
     end
 
     % Create the figure for the GUI
-    hFig = figure('Name','Filter EEG Dataset',...
+    hFig = figure('Name','Label EEG Dataset',...
                   'NumberTitle','off',...
                   'MenuBar','none',...
                   'ToolBar','none',...
@@ -162,35 +162,35 @@ function [EEG, com] = pop_filter_datasets(EEG)
     
     % Create parts of the layout for non-region sections
     geomhoriz = { ...
-        [1 1 1 1], ...        % Filter Dataset Options title
+        [1 1 1 1], ...        % Label Dataset Options title
         1, ...                % Configuration management
         [0.33 0.33 0.34], ... % Save config, Load config, Load last config buttons
-        1, ...                % Filter Description title
-        [2 1], ...            % Filter Description edit box
+        1, ...                % Label Description title
+        [2 1], ...            % Label Description edit box
         1, ...                % Time-Locked Region title
         1, ...                % Time-Locked Region description
     };
     
     uilist = { ...
-        {'Style','text','String','Filter Dataset Options:', 'FontWeight', 'bold'}, ...
+        {'Style','text','String','Eye-Event Labeling Options:', 'FontWeight', 'bold'}, ...
         {}, ...
         {}, ...
         {}, ...
         ...
         {'Style','text','String','Configuration Management:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','pushbutton','String','Save Filter Config','callback', @save_filter_config_callback}, ...
-        {'Style','pushbutton','String','Load Filter Config','callback', @load_filter_config_callback}, ...
-        {'Style','pushbutton','String','Load Last Filter Config','callback', @load_last_filter_config_callback}, ...
+        {'Style','pushbutton','String','Save Label Config','callback', @save_label_config_callback}, ...
+        {'Style','pushbutton','String','Load Label Config','callback', @load_label_config_callback}, ...
+        {'Style','pushbutton','String','Load Last Label Config','callback', @load_last_label_config_callback}, ...
         ...
-        {'Style','text','String','Filter Description:', 'FontWeight', 'bold'}, ...
+        {'Style','text','String','Label Description:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Description for this filter (used in BDF generation):'}, ...
-        {'Style','edit','String','','tag','edtFilterDescription'}, ...
+        {'Style','text','String','Description for this label (used in BDF generation):'}, ...
+        {'Style','edit','String','','tag','edtLabelDescription'}, ...
         ...
         {'Style','text','String','Time-Locked Region Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates the main region of interest for the rest of the filters to be applied.'}, ...
+        {'Style','text','String','Indicates the main region of interest for the rest of the selections to be applied.'}, ...
     };
     
     % Add dynamically generated checkboxes for regions
@@ -235,7 +235,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     additionalUIList = { ...
         {'Style','text','String','Pass Type Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates whether the first-pass fixation on the time-locked region needs to be filtered or all fixations but the first-pass fixation.'}, ...
+        {'Style','text','String','Indicates whether the first-pass fixation on the time-locked region needs to be labeled or all fixations but the first-pass fixation.'}, ...
         ...
         {'Style','checkbox','String', passTypeOptions{1}, 'tag','chkPass1'}, ...
         {'Style','checkbox','String', passTypeOptions{2}, 'tag','chkPass2'}, ...
@@ -306,7 +306,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
     additionalUIList = [additionalUIList, { ...
         {'Style','text','String','Fixation Type Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates the exact type of fixation event to be filtered.'}, ...
+        {'Style','text','String','Indicates the exact type of fixation event to be labeled.'}, ...
         ...
         {'Style','checkbox','String', fixationTypeOptions{1}, 'tag','chkFixType1'}, ...
         {'Style','checkbox','String', fixationTypeOptions{2}, 'tag','chkFixType2'}, ...
@@ -316,7 +316,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
         ...
         {'Style','text','String','Saccade Direction Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates the direction of the saccade event to be filtered.'}, ...
+        {'Style','text','String','Indicates the direction of the saccade event to be labeled.'}, ...
         ...
         {'Style','text','String','Saccade In:'}, ...
         {'Style','checkbox','String', saccadeInDirectionOptions{1}, 'tag','chkSaccadeIn1'}, ...
@@ -330,8 +330,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         ...
         {}, ...
         {'Style', 'pushbutton', 'String', 'Cancel', 'callback', @(~,~) cancel_button}, ...
-        {'Style', 'pushbutton', 'String', 'Apply Additional Filter', 'callback', @(~,~) apply_filter}, ...
-        {'Style', 'pushbutton', 'String', 'Finish Filtering Process', 'callback', @(~,~) finish_filtering} ...
+        {'Style', 'pushbutton', 'String', 'Apply Additional Label', 'callback', @(~,~) apply_label}, ...
+{'Style', 'pushbutton', 'String', 'Finish Labeling Process', 'callback', @(~,~) finish_labeling} ...
     }];
     
     % Combine all parts
@@ -352,15 +352,15 @@ function [EEG, com] = pop_filter_datasets(EEG)
         % Set the command to empty to indicate cancellation
         com = '';
         uiresume(gcf);  % Resume execution (release uiwait)
-        fprintf('User selected to cancel the filtering process.\n');
+        fprintf('User selected to cancel the labeling process.\n');
         close(gcf);
     end
 
     % Callback for the Finish button
-    function finish_filtering(~,~)
+    function finish_labeling(~,~)
         % Check if we're in batch mode and offer batch processing
         if batch_mode
-            % Check if any region is selected for the final filter
+            % Check if any region is selected for the final label
             regionSelected = false;
             for ii = 1:length(regionCheckboxTags)
                 if get(findobj('tag', regionCheckboxTags{ii}), 'Value') == 1
@@ -370,18 +370,12 @@ function [EEG, com] = pop_filter_datasets(EEG)
             end
             
             if regionSelected
-                % There's a final filter to apply
-                choice = questdlg(sprintf(['Apply final filter configuration to all %d datasets?'], length(batchFilePaths)), ...
-                                 'Final Filter', 'Yes', 'No', 'Yes');
-                
-                if strcmp(choice, 'Yes')
-                    % Apply the final filter to all datasets
-                    apply_filter_internal(true);
-                    return;
-                end
+                % There's a final label to apply - automatically apply to all datasets
+                apply_label_internal(true);
+                return;
             end
             
-            % No final filter to apply, just finish
+            % No final label to apply, just finish
             % Clean up temporary files
             cleanup_temp_files(batchFilePaths);
             
@@ -411,20 +405,20 @@ function [EEG, com] = pop_filter_datasets(EEG)
             % Clear batch mode after processing (keep output dir for BDF generation)
             evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_mode');
             
-            com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtering completed with %d filters applied', current_batch_filter_count);
+            com = sprintf('EEG = pop_label_datasets(EEG); %% Batch labeling completed with %d labels applied', current_batch_label_count);
             
             % Show completion message with total events processed and WAIT for user acknowledgment
-            total_events_msg = sprintf('Batch filtering complete!\n\n%d datasets processed with %d filters applied.\n\nFinal filter processed events across all datasets.', processed_count, current_batch_filter_count);
+            total_events_msg = sprintf('Batch labeling complete!\n\n%d datasets processed with %d labels applied.\n\nFinal label processed events across all datasets.', processed_count, current_batch_label_count);
             h_msg = msgbox(total_events_msg, 'Batch Complete');
             waitfor(h_msg); % Wait for user to close the message box
             
-            current_batch_filter_count = 0; % Reset filter count AFTER showing message
+            current_batch_label_count = 0; % Reset label count AFTER showing message
             uiresume(gcf);
             close(gcf);
             return;
         end
         
-        % Apply the current filter if any and then signal completion
+        % Apply the current label if any and then signal completion
         % Check if any region is selected
         regionSelected = false;
         for ii = 1:length(regionCheckboxTags)
@@ -435,31 +429,31 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
         
         if ~regionSelected
-            % If no regions selected, just finish without applying a filter
-            com = sprintf('EEG = pop_filter_datasets(EEG); %% Filtering completed');
+            % If no regions selected, just finish without applying a label
+            com = sprintf('EEG = pop_label_datasets(EEG); %% Labeling completed');
             uiresume(gcf);  % Resume execution (release uiwait)
             close(gcf);
         else
-            % Apply the current filter and then finish
-            apply_filter_internal(true);
+            % Apply the current label and then finish
+            apply_label_internal(true);
         end
     end
 
-    % Callback for the Apply Filter button
-    function apply_filter(~,~)
-        % Apply the filter but keep the GUI open for further filtering
-        apply_filter_internal(false);
+    % Callback for the Apply Label button
+    function apply_label(~,~)
+        % Apply the label but keep the GUI open for further labeling
+        apply_label_internal(false);
     end
 
-    % Save filter configuration callback
-    function save_filter_config_callback(~,~)
-        config = collect_filter_gui_settings();
+    % Save label configuration callback
+    function save_label_config_callback(~,~)
+        config = collect_label_gui_settings();
         if isempty(config)
             return; % Error occurred in collection
         end
         
         % Prompt user for filename
-        [filename, filepath] = uiputfile('*.mat', 'Save Filter Configuration', 'my_filter_config.mat');
+        [filename, filepath] = uiputfile('*.mat', 'Save Label Configuration', 'my_label_config.mat');
         if isequal(filename, 0)
             return; % User cancelled
         end
@@ -467,46 +461,46 @@ function [EEG, com] = pop_filter_datasets(EEG)
         full_filename = fullfile(filepath, filename);
         
         try
-            save_filter_config(config, full_filename);
-            msgbox(sprintf('Filter configuration saved successfully to:\n%s', full_filename), 'Save Complete', 'help');
+            save_label_config(config, full_filename);
+            msgbox(sprintf('Label configuration saved successfully to:\n%s', full_filename), 'Save Complete', 'help');
         catch ME
-            errordlg(['Error saving filter configuration: ' ME.message], 'Save Error');
+            errordlg(['Error saving label configuration: ' ME.message], 'Save Error');
         end
     end
 
-    % Load filter configuration callback
-    function load_filter_config_callback(~,~)
+    % Load label configuration callback
+    function load_label_config_callback(~,~)
         try
-            config = load_filter_config(); % Will show file dialog
+            config = load_label_config(); % Will show file dialog
             if isempty(config)
                 return; % User cancelled
             end
             
-            apply_filter_config_to_gui(config);
-            msgbox('Filter configuration loaded successfully!', 'Load Complete', 'help');
+            apply_label_config_to_gui(config);
+            msgbox('Label configuration loaded successfully!', 'Load Complete', 'help');
         catch ME
-            errordlg(['Error loading filter configuration: ' ME.message], 'Load Error');
+            errordlg(['Error loading label configuration: ' ME.message], 'Load Error');
         end
     end
 
-    % Load last filter configuration callback
-    function load_last_filter_config_callback(~,~)
+    % Load last label configuration callback
+    function load_last_label_config_callback(~,~)
         try
-            if ~check_last_filter_config()
-                msgbox('No previous filter configuration found. Use "Save Filter Config" first to create a saved configuration.', 'No Previous Config', 'warn');
+            if ~check_last_label_config()
+                msgbox('No previous label configuration found. Use "Save Label Config" first to create a saved configuration.', 'No Previous Config', 'warn');
                 return;
             end
             
-            config = load_filter_config('last_filter_config.mat');
-            apply_filter_config_to_gui(config);
-            msgbox('Last filter configuration loaded successfully!', 'Load Complete', 'help');
+            config = load_label_config('last_label_config.mat');
+            apply_label_config_to_gui(config);
+            msgbox('Last label configuration loaded successfully!', 'Load Complete', 'help');
         catch ME
-            errordlg(['Error loading last filter configuration: ' ME.message], 'Load Error');
+            errordlg(['Error loading last label configuration: ' ME.message], 'Load Error');
         end
     end
 
-    % Collect current filter GUI settings
-    function config = collect_filter_gui_settings()
+    % Collect current label GUI settings
+    function config = collect_label_gui_settings()
         config = struct();
         
         try
@@ -552,23 +546,23 @@ function [EEG, com] = pop_filter_datasets(EEG)
             config.saccadeOutForward = get(findobj('tag','chkSaccadeOut1'), 'Value');
             config.saccadeOutBackward = get(findobj('tag','chkSaccadeOut2'), 'Value');
             
-            % Filter description
-            config.filterDescription = get(findobj('tag','edtFilterDescription'), 'String');
-            if iscell(config.filterDescription)
-                config.filterDescription = config.filterDescription{1};
+            % Label description
+            config.labelDescription = get(findobj('tag','edtLabelDescription'), 'String');
+            if iscell(config.labelDescription)
+                config.labelDescription = config.labelDescription{1};
             end
             
             % Store available regions for validation when loading
             config.availableRegions = regionNames;
             
         catch ME
-            errordlg(['Error collecting filter GUI settings: ' ME.message], 'Collection Error');
+            errordlg(['Error collecting label GUI settings: ' ME.message], 'Collection Error');
             config = [];
         end
     end
 
-    % Apply filter configuration to GUI
-    function apply_filter_config_to_gui(config)
+    % Apply label configuration to GUI
+    function apply_label_config_to_gui(config)
         try
             % Validate that saved regions are compatible with current regions
             if isfield(config, 'availableRegions')
@@ -670,18 +664,18 @@ function [EEG, com] = pop_filter_datasets(EEG)
                 set(findobj('tag','chkSaccadeOut2'), 'Value', config.saccadeOutBackward);
             end
             
-            % Apply filter description
-            if isfield(config, 'filterDescription')
-                set(findobj('tag','edtFilterDescription'), 'String', config.filterDescription);
+            % Apply label description
+            if isfield(config, 'labelDescription')
+                set(findobj('tag','edtLabelDescription'), 'String', config.labelDescription);
             end
             
         catch ME
-            errordlg(['Error applying filter configuration to GUI: ' ME.message], 'Apply Error');
+            errordlg(['Error applying label configuration to GUI: ' ME.message], 'Apply Error');
         end
     end
 
-    % Actual filter implementation - shared by both apply and finish buttons
-    function apply_filter_internal(finishAfter)
+    % Actual label implementation - shared by both apply and finish buttons
+    function apply_label_internal(finishAfter)
         % Check if any region is selected
         regionSelected = false;
         for ii = 1:length(regionCheckboxTags)
@@ -692,24 +686,34 @@ function [EEG, com] = pop_filter_datasets(EEG)
         end
         
         if ~regionSelected
-            errordlg('Please select at least one time-locked region to filter on.', 'Error');
+            errordlg('Please select at least one time-locked region to label on.', 'Error');
             return;
         end
         
-        % Collect filter configuration
-        filter_config = collect_filter_gui_settings();
-        if isempty(filter_config)
+        % Check if label description is provided
+        labelDescription = get(findobj('tag','edtLabelDescription'), 'String');
+        if iscell(labelDescription)
+            labelDescription = labelDescription{1};
+        end
+        if isempty(strtrim(labelDescription))
+            errordlg('Please enter a Label Description before proceeding with labeling.', 'Label Description Required');
+            return;
+        end
+        
+        % Collect label configuration
+        label_config = collect_label_gui_settings();
+        if isempty(label_config)
             return; % Error occurred in collection
         end
         
         try
             % Handle batch mode
             if batch_mode
-                % Increment filter count for batch processing
-                current_batch_filter_count = current_batch_filter_count + 1;
+                % Increment label count for batch processing
+                current_batch_label_count = current_batch_label_count + 1;
                 
-                % Apply filter to all datasets in batch
-                [processed_count, batch_com] = batch_apply_filters_with_count(batchFilePaths, batchFilenames, outputDir, filter_config, current_batch_filter_count);
+                % Apply label to all datasets in batch
+                [processed_count, batch_com] = batch_apply_labels_with_count(batchFilePaths, batchFilenames, outputDir, label_config, current_batch_label_count);
                 
                 if finishAfter
                     % Clean up temporary files
@@ -741,73 +745,73 @@ function [EEG, com] = pop_filter_datasets(EEG)
                     % Clear batch mode after processing (keep output dir for BDF generation)
                     evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_mode');
                     
-                    com = sprintf('EEG = pop_filter_datasets(EEG); %% Batch filtering completed with %d filters applied', current_batch_filter_count);
+                    com = sprintf('EEG = pop_label_datasets(EEG); %% Batch labeling completed with %d labels applied', current_batch_label_count);
                     
                     % Show completion message with total events processed and WAIT for user acknowledgment
-                    total_events_msg = sprintf('Batch filtering complete!\n\n%d datasets processed with %d filters applied.\n\nFinal filter processed events across all datasets.', processed_count, current_batch_filter_count);
+                    total_events_msg = sprintf('Batch labeling complete!\n\n%d datasets processed with %d labels applied.\n\nFinal label processed events across all datasets.', processed_count, current_batch_label_count);
                     h_msg = msgbox(total_events_msg, 'Batch Complete');
                     waitfor(h_msg); % Wait for user to close the message box
                     
-                    current_batch_filter_count = 0; % Reset filter count AFTER showing message
+                    current_batch_label_count = 0; % Reset label count AFTER showing message
                     uiresume(gcf);
                     close(gcf);
                     return; % Add missing return to prevent further execution
                     
                 else
                     % Show progress message but keep GUI open
-                    msgbox(sprintf('Filter %02d applied to all %d datasets!\n\nYou can now configure and apply another filter.', current_batch_filter_count, processed_count), 'Batch Filter Applied', 'help');
+                    msgbox(sprintf('Label %02d applied to all %d datasets!\n\nYou can now configure and apply another label.', current_batch_label_count, processed_count), 'Batch Label Applied', 'help');
                     
-                    % Reset GUI for next filter
-                    reset_gui_for_next_filter();
+                    % Reset GUI for next label
+                    reset_gui_for_next_label();
                 end
                 return;
             end
             
             % Single dataset mode - existing logic
             % Convert configuration to parameters for core function
-            filter_params = convert_config_to_params_gui(filter_config);
+            label_params = convert_config_to_params_gui(label_config);
             
-            % Apply the filter using the core function
-            [filteredEEG, filter_com] = filter_datasets_core(EEG, filter_params{:});
+            % Apply the label using the core function
+            [labeledEEG, label_com] = label_datasets_core(EEG, label_params{:});
             
             % Update the EEG variable directly
-            EEG = filteredEEG;
+            EEG = labeledEEG;
             
-            % Auto-save current filter configuration for future use
+            % Auto-save current label configuration for future use
             try
-                    save_filter_config(filter_config, 'last_filter_config.mat');
+                    save_label_config(label_config, 'last_label_config.mat');
             catch
                 % Don't fail the main process if auto-save fails
-                fprintf('Note: Could not auto-save filter configuration (this is not critical)\n');
+                fprintf('Note: Could not auto-save label configuration (this is not critical)\n');
             end
             
-            assignin('base', 'EEG', filteredEEG);
-            com = filter_com;
+            assignin('base', 'EEG', labeledEEG);
+            com = label_com;
             
-            % Display a message box with filter results
-            if filteredEEG.eyesort_last_filter_matched_count > 0
-                msgStr = sprintf(['Filter applied successfully!\n\n',...
-                                'Identified %d events matching your filter criteria.\n\n',...
+            % Display a message box with label results
+            if labeledEEG.eyesort_last_label_matched_count > 0
+                msgStr = sprintf(['Label applied successfully!\n\n',...
+                                'Identified %d events matching your label criteria.\n\n',...
                                 'These events have been labeled with a 6-digit code: CCRRFF\n',...
-                                'Where: CC = condition code, RR = region code, FF = filter code\n\n',...
+                                'Where: CC = condition code, RC = region code, LC = label code\n\n',...
                                 '%s'],...
-                                filteredEEG.eyesort_last_filter_matched_count, ...
-                                iif(finishAfter, 'Filtering complete!', 'You can now apply another filter or click Finish when done.'));
+                                labeledEEG.eyesort_last_label_matched_count, ...
+                                iif(finishAfter, 'Labeling complete!', 'You can now apply another label or click Finish when done.'));
                 
-                hMsg = msgbox(msgStr, 'Filter Applied', 'help');
+                hMsg = msgbox(msgStr, 'Label Applied', 'help');
             else
                 % Special message for when no events were found
-                msgStr = sprintf(['WARNING: Filter applied, but NO EVENTS matched your criteria!\n\n',...
+                msgStr = sprintf(['WARNING: Label applied, but NO EVENTS matched your criteria!\n\n',...
                                 'This could be because:\n',...
-                                '1. The filter criteria are too restrictive\n',...
+                                '1. The label criteria are too restrictive\n',...
                                 '2. There is a mismatch between expected event fields and actual data\n',...
-                                '3. The events that would match already have filter codes from a previous filter\n\n',...
+                                '3. The events that would match already have label codes from a previous label\n\n',...
                                 'Consider:\n',...
                                 '- Relaxing your criteria\n',...
-                                '- Checking for conflicts with existing filters\n',...
+                                '- Checking for conflicts with existing labels\n',...
                                 '- Verifying your dataset contains the expected fields\n\n',...
                                 '%s'],...
-                                iif(finishAfter, 'Filtering complete!', 'You can modify your filter settings and try again.'));
+                                iif(finishAfter, 'Labeling complete!', 'You can modify your label settings and try again.'));
                 
                 hMsg = msgbox(msgStr, 'No Events Found', 'warn');
             end
@@ -824,17 +828,17 @@ function [EEG, com] = pop_filter_datasets(EEG)
                 uiresume(gcf);  % Resume execution to let uiwait finish
                 close(gcf);
             else
-                % Reset the GUI for next filter
-                reset_gui_for_next_filter();
+                % Reset the GUI for next label
+                reset_gui_for_next_label();
             end
         catch ME
-            errordlg(['Error applying filter: ' ME.message], 'Error');
+            errordlg(['Error applying label: ' ME.message], 'Error');
         end
     end
 
-    % Helper function to reset GUI for next filter
-    function reset_gui_for_next_filter()
-        % Reset the time-locked region selection for the next filter
+    % Helper function to reset GUI for next label
+    function reset_gui_for_next_label()
+        % Reset the time-locked region selection for the next label
         for i = 1:length(regionCheckboxTags)
             set(findobj('tag', regionCheckboxTags{i}), 'Value', 0);
         end
@@ -849,76 +853,76 @@ function [EEG, com] = pop_filter_datasets(EEG)
             set(findobj('tag', nextRegionCheckboxTags{i}), 'Value', 0);
         end
         
-        % Reset the filter description
-        set(findobj('tag','edtFilterDescription'), 'String', '');
+        % Reset the label description
+        set(findobj('tag','edtLabelDescription'), 'String', '');
     end
 
-    % Batch apply filters with proper filter count tracking
-    function [processed_count, com] = batch_apply_filters_with_count(filePaths, fileNames, outputDir, config, filterNum)
+    % Batch apply labels with proper label count tracking
+    function [processed_count, com] = batch_apply_labels_with_count(filePaths, fileNames, outputDir, config, labelNum)
         processed_count = 0;
         com = '';
         
         % Create a progress bar
-        h = waitbar(0, sprintf('Applying filter %02d to batch datasets...', filterNum), 'Name', 'Batch Processing');
+        h = waitbar(0, sprintf('Applying label %02d to batch datasets...', labelNum), 'Name', 'Batch Processing');
         
         try
             for i = 1:length(filePaths)
-                waitbar(i/length(filePaths), h, sprintf('Processing %d of %d: %s (Filter %02d)', i, length(filePaths), fileNames{i}, filterNum));
+                waitbar(i/length(filePaths), h, sprintf('Processing %d of %d: %s (Label %02d)', i, length(filePaths), fileNames{i}, labelNum));
                 
                 try
                     % Generate clean filename once at the start
                     [~, fileName, ~] = fileparts(filePaths{i});
                     % Remove common processing suffixes and temp indicators
-                    cleanFileName = regexprep(fileName, '(_temp|_textia|_processed|_filtered)+', '');
+                    cleanFileName = regexprep(fileName, '(_temp|_textia|_processed|_labeled)+', '');
                     cleanFileName = regexprep(cleanFileName, '_+', '_'); % Remove multiple underscores  
                     cleanFileName = regexprep(cleanFileName, '^_|_$', ''); % Remove leading/trailing underscores
                     
-                    % For first filter, load from original path
-                    % For subsequent filters, load from output directory (previously filtered version)
-                    if filterNum == 1
+                    % For first label, load from original path
+                    % For subsequent labels, load from output directory (previously labeled version)
+                    if labelNum == 1
                         tempEEG = pop_loadset('filename', filePaths{i});
                     else
-                        % Load the previously filtered version using the same clean filename
+                        % Load the previously labeled version using the same clean filename
                         previous_file = fullfile(outputDir, [cleanFileName '_processed.set']);
                         if exist(previous_file, 'file')
                             tempEEG = pop_loadset('filename', previous_file);
                         else
-                            warning('Previous filtered file not found: %s, using original', previous_file);
+                            warning('Previous labeled file not found: %s, using original', previous_file);
                             tempEEG = pop_loadset('filename', filePaths{i});
                         end
                     end
                     
-                    % CRITICAL: Reset filter count and ensure dataset integrity
-                    tempEEG.eyesort_filter_count = filterNum - 1; % Will be incremented by core function
+                    % CRITICAL: Reset label count and ensure dataset integrity
+                    tempEEG.eyesort_label_count = labelNum - 1; % Will be incremented by core function
                     
-                    % Verify dataset has required fields for filtering
+                    % Verify dataset has required fields for labeling
                     if ~isfield(tempEEG, 'eyesort_field_names') || isempty(tempEEG.eyesort_field_names)
                         warning('Dataset %s missing eyesort_field_names - may not be properly processed', cleanFileName);
                         continue;
                     end
                     
                     % Convert configuration to parameters
-                    filter_params = convert_config_to_params_gui(config);
+                    label_params = convert_config_to_params_gui(config);
                     
-                    % Auto-save current filter configuration (only once, on first dataset)
+                    % Auto-save current label configuration (only once, on first dataset)
                     if i == 1
                         try
-                            save_filter_config(config, 'last_filter_config.mat');
-                            fprintf('Auto-saved filter configuration to last_filter_config.mat\n');
+                            save_label_config(config, 'last_label_config.mat');
+                            fprintf('Auto-saved label configuration to last_label_config.mat\n');
                         catch ME
-                            fprintf('Warning: Could not auto-save filter configuration: %s\n', ME.message);
+                            fprintf('Warning: Could not auto-save label configuration: %s\n', ME.message);
                         end
                     end
                     
-                    % Apply the filter
-                    [filteredEEG, ~] = filter_datasets_core(tempEEG, filter_params{:});
+                    % Apply the label
+                    [labeledEEG, ~] = label_datasets_core(tempEEG, label_params{:});
                     
                     % Save with consistent clean name
                     output_path = fullfile(outputDir, [cleanFileName '_processed.set']);
-                    pop_saveset(filteredEEG, 'filename', output_path, 'savemode', 'twofiles');
+                    pop_saveset(labeledEEG, 'filename', output_path, 'savemode', 'twofiles');
                     
                     % Clear variables to free memory and prevent storage bloat
-                    clear tempEEG filteredEEG;
+                    clear tempEEG labeledEEG;
                     % Force MATLAB to clean up memory (if available)
                     try
                         pack;
@@ -927,7 +931,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
                     end
                     
                     processed_count = processed_count + 1;
-                    fprintf('Successfully processed dataset %d/%d: %s with filter %02d\n', processed_count, length(filePaths), cleanFileName, filterNum);
+                    fprintf('Successfully processed dataset %d/%d: %s with label %02d\n', processed_count, length(filePaths), cleanFileName, labelNum);
                     
                 catch ME
                     warning('Failed to process dataset %s: %s', filePaths{i}, ME.message);
@@ -937,7 +941,7 @@ function [EEG, com] = pop_filter_datasets(EEG)
             % Close progress bar
             delete(h);
             
-            com = sprintf('EEG = pop_filter_datasets(EEG); %% Applied filter %02d to %d datasets', filterNum, processed_count);
+            com = sprintf('EEG = pop_label_datasets(EEG); %% Applied label %02d to %d datasets', labelNum, processed_count);
             
         catch ME
             if exist('h', 'var') && ishandle(h)
@@ -948,13 +952,13 @@ function [EEG, com] = pop_filter_datasets(EEG)
     end
 
     % Convert GUI configuration to parameters for core function
-    function filter_params = convert_config_to_params_gui(config)
-        filter_params = {};
+    function label_params = convert_config_to_params_gui(config)
+        label_params = {};
         
         % Time-locked regions
         if isfield(config, 'selectedRegions') && ~isempty(config.selectedRegions)
-            filter_params{end+1} = 'timeLockedRegions';
-            filter_params{end+1} = config.selectedRegions;
+            label_params{end+1} = 'timeLockedRegions';
+            label_params{end+1} = config.selectedRegions;
         end
         
         % Pass options
@@ -971,19 +975,19 @@ function [EEG, com] = pop_filter_datasets(EEG)
         if isempty(passOptions)
             passOptions = 1;
         end
-        filter_params{end+1} = 'passOptions';
-        filter_params{end+1} = passOptions;
+        label_params{end+1} = 'passOptions';
+        label_params{end+1} = passOptions;
         
         % Previous regions
         if isfield(config, 'selectedPrevRegions') && ~isempty(config.selectedPrevRegions)
-            filter_params{end+1} = 'prevRegions';
-            filter_params{end+1} = config.selectedPrevRegions;
+            label_params{end+1} = 'prevRegions';
+            label_params{end+1} = config.selectedPrevRegions;
         end
         
         % Next regions
         if isfield(config, 'selectedNextRegions') && ~isempty(config.selectedNextRegions)
-            filter_params{end+1} = 'nextRegions';
-            filter_params{end+1} = config.selectedNextRegions;
+            label_params{end+1} = 'nextRegions';
+            label_params{end+1} = config.selectedNextRegions;
         end
         
         % Fixation options
@@ -1006,8 +1010,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         if isempty(fixationOptions)
             fixationOptions = 0; % Default to "any fixation"
         end
-        filter_params{end+1} = 'fixationOptions';
-        filter_params{end+1} = fixationOptions;
+        label_params{end+1} = 'fixationOptions';
+        label_params{end+1} = fixationOptions;
         
         % Saccade in options
         saccadeInOptions = [];
@@ -1020,8 +1024,8 @@ function [EEG, com] = pop_filter_datasets(EEG)
         if isempty(saccadeInOptions)
             saccadeInOptions = 1;
         end
-        filter_params{end+1} = 'saccadeInOptions';
-        filter_params{end+1} = saccadeInOptions;
+        label_params{end+1} = 'saccadeInOptions';
+        label_params{end+1} = saccadeInOptions;
         
         % Saccade out options
         saccadeOutOptions = [];
@@ -1034,20 +1038,20 @@ function [EEG, com] = pop_filter_datasets(EEG)
         if isempty(saccadeOutOptions)
             saccadeOutOptions = 1;
         end
-        filter_params{end+1} = 'saccadeOutOptions';
-        filter_params{end+1} = saccadeOutOptions;
+        label_params{end+1} = 'saccadeOutOptions';
+        label_params{end+1} = saccadeOutOptions;
         
         % Add conditions and items - these should be empty for batch processing
         % to allow each dataset to determine its own conditions/items
-        filter_params{end+1} = 'conditions';
-        filter_params{end+1} = [];
-        filter_params{end+1} = 'items';
-        filter_params{end+1} = [];
+        label_params{end+1} = 'conditions';
+        label_params{end+1} = [];
+        label_params{end+1} = 'items';
+        label_params{end+1} = [];
         
-        % Add filter description
-        if isfield(config, 'filterDescription') && ~isempty(config.filterDescription)
-            filter_params{end+1} = 'filterDescription';
-            filter_params{end+1} = config.filterDescription;
+        % Add label description
+        if isfield(config, 'labelDescription') && ~isempty(config.labelDescription)
+            label_params{end+1} = 'labelDescription';
+            label_params{end+1} = config.labelDescription;
         end
     end
 
