@@ -84,7 +84,7 @@ function currvers = eegplugin_eyesort(fig, ~, ~)
                 'callback', @(src,event) try_callback(@pop_load_pixel_ia, src, event));
 
             % Add the new label datasets menu item
-uimenu(submenu, 'label', '3. Eye-Event Labeling', 'separator', 'off', ...
+uimenu(submenu, 'label', '3. Eye-Tracking Event Labeling', 'separator', 'off', ...
 'callback', @(src,event) try_callback(@pop_label_datasets, src, event));
             
             % Add the new BDF generator menu item

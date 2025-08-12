@@ -15,6 +15,38 @@ function EEG = compute_pixel_based_ia_word_level(EEG, txtFilePath, ...
         error('Failed to read file: %s', txtFilePath);
     end
     
+    % Validate and correct condition and item column names with case-insensitive matching
+    fprintf('\nValidating condition and item columns:\n');
+    [conditionColName, foundCondCol] = findBestColumnMatch(data.Properties.VariableNames, conditionColName);
+    [itemColName, foundItemCol] = findBestColumnMatch(data.Properties.VariableNames, itemColName);
+    
+    if ~foundCondCol
+        error('Condition column "%s" not found in data file.\nAvailable columns: %s', conditionColName, strjoin(data.Properties.VariableNames, ', '));
+    end
+    if ~foundItemCol
+        error('Item column "%s" not found in data file.\nAvailable columns: %s', itemColName, strjoin(data.Properties.VariableNames, ', '));
+    end
+    
+    fprintf('✓ Using condition column: %s\n', conditionColName);
+    fprintf('✓ Using item column: %s\n', itemColName);
+
+    % Validate and correct region names with case-insensitive matching
+    fprintf('\nValidating region columns:\n');
+    for i = 1:length(regionNames)
+        [correctedName, found] = findBestColumnMatch(data.Properties.VariableNames, regionNames{i});
+        if found
+            if ~strcmp(regionNames{i}, correctedName)
+                fprintf('✓ Found region "%s" as "%s"\n', regionNames{i}, correctedName);
+                regionNames{i} = correctedName;
+            else
+                fprintf('✓ Found region: %s\n', regionNames{i});
+            end
+        else
+            fprintf('✗ Missing region column: %s\n', regionNames{i});
+            error('Region column "%s" not found in data file.\nAvailable columns: %s', regionNames{i}, strjoin(data.Properties.VariableNames, ', '));
+        end
+    end
+
     % Create maps to store boundaries
     boundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
     wordBoundaryMap = containers.Map('KeyType', 'char', 'ValueType', 'any');
@@ -227,4 +259,44 @@ function wordRegion = determine_word_region(event)
     end
     
     wordRegion = '';
+end
+
+%% Helper function: findBestColumnMatch
+function [bestMatch, found] = findBestColumnMatch(availableColumns, requestedColumn)
+    % FINDBESTCOLUMNMATCH - Finds the best match for a column name in a dataset
+    %
+    % This function tries to match a requested column name with available columns,
+    % handling case differences and special characters like '$'.
+    
+    % Check for exact match first
+    if ismember(requestedColumn, availableColumns)
+        bestMatch = requestedColumn;
+        found = true;
+        return;
+    end
+    
+    % Check for match with/without '$' prefix
+    if startsWith(requestedColumn, '$')
+        altColumn = requestedColumn(2:end);
+    else
+        altColumn = ['$' requestedColumn];
+    end
+    if ismember(altColumn, availableColumns)
+        bestMatch = altColumn;
+        found = true;
+        return;
+    end
+    
+    % Check for case-insensitive match
+    for i = 1:length(availableColumns)
+        if strcmpi(requestedColumn, availableColumns{i})
+            bestMatch = availableColumns{i};
+            found = true;
+            return;
+        end
+    end
+    
+    % No match found
+    bestMatch = requestedColumn;
+    found = false;
 end 

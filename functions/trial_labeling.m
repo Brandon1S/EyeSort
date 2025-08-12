@@ -40,13 +40,13 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
     currentCond = [];
     sentenceActive = ~useSentenceCodes;  % If no sentence codes, always active within trials
 
-    % For tracking regression status and fixations in the Ending region:
-    % inEndRegion is true once we enter the "Ending" region.
-    % Store indices of fixations (in EEG.event) that occur in the Ending region.
+    % For tracking regression status and fixations in the last region:
+    % inEndRegion is true once we enter the last region.
+    % Store indices of fixations (in EEG.event) that occur in the last region.
     trialRegressionMap = containers.Map('KeyType', 'double', 'ValueType', 'logical');
     inEndRegion = false;
     endRegionFixations = [];  
-    endRegionFixationCount = 0;  % number of fixations stored in Ending region
+    endRegionFixationCount = 0;  % number of fixations stored in last region
 
     % - Word and region tracking maps
     % These track visited words/regions and count fixations for first-pass detection
@@ -113,7 +113,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
         % Trial start %
         %%%%%%%%%%%%%%% 
         % This section is responsible for resetting the trial-level tracking variables
-        if strcmp(eventTypeNoSpace, strrep(startCode, ' ', ''))
+        if flexibleTriggerMatch(eventTypeNoSpace, strrep(startCode, ' ', ''))
             currentTrial = currentTrial + 1;
             hasRegressionBeenFound(currentTrial) = false;  % Initialize flag for new trial
             % Reset word and region tracking for new tria
@@ -128,7 +128,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             previousWord = '';
             previousRegion = '';
             sentenceActive = ~useSentenceCodes;  % Reset sentence state for new trial
-            % Also, clear any ending region storage from previous trial:
+            % Also, clear any last region storage from previous trial:
             inEndRegion = false;
             endRegionFixations = [];
             endRegionFixationCount = 0;
@@ -138,7 +138,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
         % Trial end  %
         %%%%%%%%%%%%%% 
         % Check for trial end
-        elseif strcmp(eventType, endCode)
+        elseif flexibleTriggerMatch(eventType, endCode)
             % Reset tracking at the end of the trial
             inEndRegion = false;
             endRegionFixationCount = 0;
@@ -150,14 +150,14 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             sentenceActive = ~useSentenceCodes;
         
         % Check for condition trigger
-        elseif any(strcmp(eventTypeNoSpace, conditionTriggersNoSpace))
+        elseif any(cellfun(@(x) flexibleTriggerMatch(eventTypeNoSpace, x), conditionTriggersNoSpace))
             % Extract the numeric value from the trigger (e.g., '224' from 'S224')
             currentCond = str2double(regexp(eventTypeNoSpace, '\d+', 'match', 'once'));
             fprintf('Setting condition to %d from trigger %s\n', currentCond, eventType);
             EEG.event(iEvt).condition_number = currentCond;
         
         % Check for item trigger
-        elseif any(strcmp(eventTypeNoSpace, itemTriggersNoSpace))
+        elseif any(cellfun(@(x) flexibleTriggerMatch(eventTypeNoSpace, x), itemTriggersNoSpace))
             % Extract the numeric value from the trigger (e.g., '39' from 'S39')
             currentItem = str2double(regexp(eventTypeNoSpace, '\d+', 'match', 'once'));
             fprintf('Setting item to %d from trigger %s\n', currentItem, eventType);
@@ -165,10 +165,10 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
         
         % Check for sentence start/end codes
         elseif useSentenceCodes
-            if strcmp(eventTypeNoSpace, strrep(sentenceStartCode, ' ', ''))
+            if flexibleTriggerMatch(eventTypeNoSpace, strrep(sentenceStartCode, ' ', ''))
                 sentenceActive = true;
                 fprintf('Sentence presentation started\n');
-            elseif strcmp(eventTypeNoSpace, strrep(sentenceEndCode, ' ', ''))
+            elseif flexibleTriggerMatch(eventTypeNoSpace, strrep(sentenceEndCode, ' ', ''))
                 sentenceActive = false;
                 fprintf('Sentence presentation ended\n');
             end
@@ -249,7 +249,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
 
                         visitedWords(currentWord) = true;
                         
-                        % Get region name from the event's region fields (e.g., 'Ending' etc.)
+                        % Get region name from the event's region fields
                         regionName = EEG.event(iEvt).(sprintf('region%d_name', curr_region));
                         
                         % Update region-related fields
@@ -275,7 +275,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                             EEG.event(iEvt).last_region_visited = '';
                         else
                             % Check if we're in the same region as before
-                            if strcmp(regionName, previousRegion)
+                            if strcmpi(regionName, previousRegion)
                                 % Same region, increment fixation count in current pass
                                 currentPassFixationCounts(regionName) = currentPassFixationCounts(regionName) + 1;
                                 EEG.event(iEvt).region_pass_number = regionPassCounts(regionName); 
@@ -363,14 +363,22 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                             end
                         end
                         
-                        % Store trial metadata
-                        EEG.event(iEvt).trial_number = currentTrial;
-                        EEG.event(iEvt).item_number = currentItem;
-                        EEG.event(iEvt).condition_number = currentCond;
+                        % Store trial metadata ONLY if event has proper region assignment
+                        if ~isempty(EEG.event(iEvt).current_region) && ~strcmpi(EEG.event(iEvt).current_region, '')
+                            EEG.event(iEvt).trial_number = currentTrial;
+                            EEG.event(iEvt).item_number = currentItem;
+                            EEG.event(iEvt).condition_number = currentCond;
+                        end
 
                         %% ======= Track ENDING region regression information =======
-                        if strcmp(EEG.event(iEvt).current_region, 'Ending')
-                            % We are in the Ending region: add this fixation to our storage.
+                        % Get the last region name from user input
+                        lastRegionName = '';
+                        if isfield(EEG, 'region_names') && ~isempty(EEG.region_names)
+                            lastRegionName = EEG.region_names{end};
+                        end
+                        
+                        if ~isempty(lastRegionName) && strcmpi(EEG.event(iEvt).current_region, lastRegionName)
+                            % We are in the last region: add this fixation to our storage.
                             if ~inEndRegion
                                 inEndRegion = true;
                                 endRegionFixationCount = 0;
@@ -385,7 +393,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                                 [~, curr_word_num] = parse_word_region(EEG.event(iEvt).current_word);
                                 [~, prev_word_num] = parse_word_region(EEG.event(iEvt).previous_word);
                                 if curr_word_num < prev_word_num
-                                    % Word-level regression detected in the Ending region.
+                                    % Word-level regression detected in the last region.
                                     hasRegressionBeenFound(currentTrial) = true;
                                     trialRegressionMap(currentTrial) = true;
                                     % Mark all events in this trial as regression trials.
@@ -397,9 +405,9 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                                 end
                             end
                         else
-                            % The current fixation is not in Ending.
-                            % If we were collecting Ending-region fixations and no regression was yet flagged,
-                            % then a regression out of the Ending region has occurred.
+                            % The current fixation is not in last region.
+                            % If we were collecting last-region fixations and no regression was yet flagged,
+                            % then a regression out of the last region has occurred.
                             if inEndRegion && ~hasRegressionBeenFound(currentTrial)
                                 hasRegressionBeenFound(currentTrial) = true;
                                 trialRegressionMap(currentTrial) = true;
@@ -409,15 +417,15 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                                     end
                                 end
                                 
-                                % Clear the Ending-region storage.
+                                % Clear the last-region storage.
                                 inEndRegion = false;
                                 endRegionFixationCount = 0;
                                 endRegionFixations = [];
                             end
                         end
-                        %% ======= End of ENDING region regression tracking =======
+                        %% ======= End of LAST region regression tracking =======
 
-                        % Now update the previous trackers AFTER handling the Ending region behavior.
+                        % Now update the previous trackers AFTER handling the last region behavior.
                         previousWord = currentWord;
                         previousRegion = regionName;
                     end
@@ -458,7 +466,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             % Set next_region_visited (next different region) with early termination
             nextDifferentRegion = '';
             for jFixIdx = iFixIdx+1:numFixations
-                if ~strcmp(regions{jFixIdx}, currentRegion) && ~isempty(regions{jFixIdx})
+                if ~strcmpi(regions{jFixIdx}, currentRegion) && ~isempty(regions{jFixIdx})
                     nextDifferentRegion = regions{jFixIdx};
                     break;  % Early termination - stops at first different region
                 end
@@ -479,7 +487,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             nextFixRegion = EEG.event(iEvt).next_fixation_region;
             
             % Last in pass if: next fixation is in different region OR no next fixation
-            EEG.event(iEvt).is_last_in_pass = isempty(nextFixRegion) || ~strcmp(currentRegion, nextFixRegion);
+                                    EEG.event(iEvt).is_last_in_pass = isempty(nextFixRegion) || ~strcmpi(currentRegion, nextFixRegion);
         end
     end
     fprintf('Done computing is_last_in_pass field.\n');
@@ -583,5 +591,31 @@ function currentWord = determine_word_region(event, fixationXField)
             % Exit loop since matching word found
             break;
         end
+    end
+end
+
+%% Helper function: flexibleTriggerMatch
+function isMatch = flexibleTriggerMatch(eventTrigger, configTrigger)
+    % FLEXIBLETRIGGERMATCH - Flexible trigger code matching
+    % Handles cases where user enters "212" but data has "S212" or "R212"
+    % BUT "R212" does NOT match "S212" - different prefixes must match exactly
+    
+    % First try exact match
+    if strcmp(eventTrigger, configTrigger)
+        isMatch = true;
+        return;
+    end
+    
+    % Check if config (user input) is just numbers (no letter prefix)
+    configIsNumberOnly = ~isempty(regexp(configTrigger, '^\d+$', 'once'));
+    
+    if configIsNumberOnly
+        % User entered just numbers, so match any prefix in event data
+        eventNum = regexp(eventTrigger, '\d+', 'match', 'once');
+        configNum = regexp(configTrigger, '\d+', 'match', 'once');
+        isMatch = ~isempty(eventNum) && ~isempty(configNum) && strcmp(eventNum, configNum);
+    else
+        % User entered with prefix, must match exactly (already checked above)
+        isMatch = false;
     end
 end

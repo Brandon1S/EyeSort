@@ -146,13 +146,7 @@ function [EEG, com] = pop_label_datasets(EEG)
         fprintf('Batch mode: %d datasets ready. Use "Load Last Label Config" to reuse previous settings.\n', length(batchFilePaths));
     end
 
-    % Create the figure for the GUI
-    hFig = figure('Name','Label EEG Dataset',...
-                  'NumberTitle','off',...
-                  'MenuBar','none',...
-                  'ToolBar','none',...
-                  'Color',[0.94 0.94 0.94], ...
-                  'Position', [100 100 680 700]);
+    % Let supergui create and size the figure automatically
     
     % Define the options to be used for checkboxes
     passTypeOptions = {'First pass only', 'Second pass only', 'Third pass and beyond'};
@@ -162,31 +156,28 @@ function [EEG, com] = pop_label_datasets(EEG)
     
     % Create parts of the layout for non-region sections
     geomhoriz = { ...
-        [1 1 1 1], ...        % Label Dataset Options title
+        1, ...        % Label Dataset Options title
         1, ...                % Configuration management
-        [0.33 0.33 0.34], ... % Save config, Load config, Load last config buttons
+        [1 1 1], ... % Save config, Load config, Load last config buttons
         1, ...                % Label Description title
-        [2 1], ...            % Label Description edit box
+        [0.75 1], ...            % Label Description edit box
         1, ...                % Time-Locked Region title
         1, ...                % Time-Locked Region description
     };
     
     uilist = { ...
-        {'Style','text','String','Eye-Event Labeling Options:', 'FontWeight', 'bold'}, ...
-        {}, ...
-        {}, ...
-        {}, ...
+        {'Style','text','String','Eye-Tracking Event Labeling Options:', 'FontWeight', 'bold'}, ...
         ...
         {'Style','text','String','Configuration Management:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','pushbutton','String','Save Label Config','callback', @save_label_config_callback}, ...
-        {'Style','pushbutton','String','Load Label Config','callback', @load_label_config_callback}, ...
-        {'Style','pushbutton','String','Load Last Label Config','callback', @load_last_label_config_callback}, ...
+        {'Style','pushbutton','String','Save Label Configuration','callback', @save_label_config_callback}, ...
+        {'Style','pushbutton','String','Load Label Configuration','callback', @load_label_config_callback}, ...
+        {'Style','pushbutton','String','Load Previous Label Configuration','callback', @load_last_label_config_callback}, ...
         ...
         {'Style','text','String','Label Description:', 'FontWeight', 'bold'}, ...
         ...
         {'Style','text','String','Description for this label (used in BDF generation):'}, ...
-        {'Style','edit','String','','tag','edtLabelDescription'}, ...
+        {'Style','edit','String','','tag','edtLabelDescription','ForegroundColor',[0 0 0]}, ...
         ...
         {'Style','text','String','Time-Locked Region Selection:', 'FontWeight', 'bold'}, ...
         ...
@@ -235,7 +226,7 @@ function [EEG, com] = pop_label_datasets(EEG)
     additionalUIList = { ...
         {'Style','text','String','Pass Type Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates whether the first-pass fixation on the time-locked region needs to be labeled or all fixations but the first-pass fixation.'}, ...
+        {'Style','text','String','Indicates what pass the fixation needs to be when fixating on the time-locked region.'}, ...
         ...
         {'Style','checkbox','String', passTypeOptions{1}, 'tag','chkPass1'}, ...
         {'Style','checkbox','String', passTypeOptions{2}, 'tag','chkPass2'}, ...
@@ -243,7 +234,7 @@ function [EEG, com] = pop_label_datasets(EEG)
         ...
         {'Style','text','String','Previous Region Selection:', 'FontWeight', 'bold'}, ...
         ...
-        {'Style','text','String','Indicates the last different region visited before entering the current region.'}, ...
+        {'Style','text','String','Indicates the last region visited prior to entering the time-locking region.'}, ...
     };
     
     % Add Previous Region checkboxes with similar logic
@@ -269,7 +260,7 @@ function [EEG, com] = pop_label_datasets(EEG)
     additionalGeomHoriz{end+1} = 1;  % Next Region title
     additionalGeomHoriz{end+1} = 1;  % Next Region description
     additionalUIList{end+1} = {'Style','text','String','Next Region Selection:', 'FontWeight', 'bold'};
-    additionalUIList{end+1} = {'Style','text','String','Indicates the next different region visited after leaving the current region.'};
+    additionalUIList{end+1} = {'Style','text','String','Indicates the next region visited after leaving the time-locking region.'};
     
     % Add Next Region checkboxes with similar logic
     for row = 1:numRows
@@ -300,7 +291,7 @@ function [EEG, com] = pop_label_datasets(EEG)
         [0.33 0.33 0.33], ...        % Saccade In label and checkboxes
         [0.33 0.33 0.33], ...        % Saccade Out label and checkboxes
         1, ...                       % Spacer
-        [2 1 1.5 1.5] ...            % Buttons
+        [1 1 1 1] ...            % Buttons
     }];
     
     additionalUIList = [additionalUIList, { ...
@@ -338,14 +329,14 @@ function [EEG, com] = pop_label_datasets(EEG)
     geomhoriz = [geomhoriz, additionalGeomHoriz];
     uilist = [uilist, additionalUIList];
     
-    % Create the GUI using supergui
-    [~, ~, ~, ~] = supergui('fig', hFig, 'geomhoriz', geomhoriz, 'uilist', uilist);
+    % Create the GUI using supergui (let it create and size the figure)
+    [~, ~, ~, hFig] = supergui('geomhoriz', geomhoriz, 'uilist', uilist, 'title', 'Label EEG Dataset');
     
-    % Center the window
-    movegui(hFig, 'center');
+    % Bring window to front
+    figure(gcf);
     
     % *** Modification: Pause execution until user interaction is complete ***
-    uiwait(hFig);  % This will pause the function until uiresume is called
+    uiwait(gcf);  % This will pause the function until uiresume is called
 
     % Callback for the Cancel button
     function cancel_button(~,~)
@@ -454,6 +445,7 @@ function [EEG, com] = pop_label_datasets(EEG)
         
         % Prompt user for filename
         [filename, filepath] = uiputfile('*.mat', 'Save Label Configuration', 'my_label_config.mat');
+        figure(gcf); % Bring GUI back to front
         if isequal(filename, 0)
             return; % User cancelled
         end
@@ -463,8 +455,10 @@ function [EEG, com] = pop_label_datasets(EEG)
         try
             save_label_config(config, full_filename);
             msgbox(sprintf('Label configuration saved successfully to:\n%s', full_filename), 'Save Complete', 'help');
+            figure(gcf); % Bring GUI back to front
         catch ME
             errordlg(['Error saving label configuration: ' ME.message], 'Save Error');
+            figure(gcf); % Bring GUI back to front
         end
     end
 
@@ -472,14 +466,17 @@ function [EEG, com] = pop_label_datasets(EEG)
     function load_label_config_callback(~,~)
         try
             config = load_label_config(); % Will show file dialog
+            figure(gcf); % Bring GUI back to front
             if isempty(config)
                 return; % User cancelled
             end
             
             apply_label_config_to_gui(config);
             msgbox('Label configuration loaded successfully!', 'Load Complete', 'help');
+            figure(gcf); % Bring GUI back to front
         catch ME
             errordlg(['Error loading label configuration: ' ME.message], 'Load Error');
+            figure(gcf); % Bring GUI back to front
         end
     end
 
@@ -488,14 +485,17 @@ function [EEG, com] = pop_label_datasets(EEG)
         try
             if ~check_last_label_config()
                 msgbox('No previous label configuration found. Use "Save Label Config" first to create a saved configuration.', 'No Previous Config', 'warn');
+                figure(gcf); % Bring GUI back to front
                 return;
             end
             
             config = load_label_config('last_label_config.mat');
             apply_label_config_to_gui(config);
             msgbox('Last label configuration loaded successfully!', 'Load Complete', 'help');
+            figure(gcf); % Bring GUI back to front
         catch ME
             errordlg(['Error loading last label configuration: ' ME.message], 'Load Error');
+            figure(gcf); % Bring GUI back to front
         end
     end
 
@@ -593,7 +593,7 @@ function [EEG, com] = pop_label_datasets(EEG)
             if isfield(config, 'selectedRegions')
                 for i = 1:length(config.selectedRegions)
                     regionName = config.selectedRegions{i};
-                    regionIdx = find(strcmp(regionNames, regionName));
+                    regionIdx = find(strcmpi(regionNames, regionName));
                     if ~isempty(regionIdx)
                         set(findobj('tag', regionCheckboxTags{regionIdx}), 'Value', 1);
                     end
@@ -615,7 +615,7 @@ function [EEG, com] = pop_label_datasets(EEG)
             if isfield(config, 'selectedPrevRegions')
                 for i = 1:length(config.selectedPrevRegions)
                     regionName = config.selectedPrevRegions{i};
-                    regionIdx = find(strcmp(regionNames, regionName));
+                    regionIdx = find(strcmpi(regionNames, regionName));
                     if ~isempty(regionIdx)
                         set(findobj('tag', prevRegionCheckboxTags{regionIdx}), 'Value', 1);
                     end
@@ -626,7 +626,7 @@ function [EEG, com] = pop_label_datasets(EEG)
             if isfield(config, 'selectedNextRegions')
                 for i = 1:length(config.selectedNextRegions)
                     regionName = config.selectedNextRegions{i};
-                    regionIdx = find(strcmp(regionNames, regionName));
+                    regionIdx = find(strcmpi(regionNames, regionName));
                     if ~isempty(regionIdx)
                         set(findobj('tag', nextRegionCheckboxTags{regionIdx}), 'Value', 1);
                     end

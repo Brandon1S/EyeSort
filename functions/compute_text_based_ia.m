@@ -104,7 +104,7 @@ function EEG = compute_text_based_ia(EEG, varargin)
             p = inputParser;
             addParameter(p, 'batch_mode', false, @islogical);
             parse(p, remaining_args{:});
-            batch_mode = p.Results.batch_mode;
+            % batch_mode = p.Results.batch_mode; % Currently unused
             
         else
             % Individual parameters method (original)
@@ -132,12 +132,20 @@ function EEG = compute_text_based_ia(EEG, varargin)
             sentenceEndCode = varargin{18};
             conditionTypeColName = varargin{19};
             
+            % Ensure conditionTypeColName is in proper format (handle cell array from GUI)
+            if iscell(conditionTypeColName)
+                % Already a cell array from GUI processing
+                % No additional processing needed
+            elseif ischar(conditionTypeColName) || isstring(conditionTypeColName)
+                conditionTypeColName = strtrim(strsplit(conditionTypeColName, ','));
+            end
+            
             % Parse optional parameters
             remaining_args = varargin(20:end);
             p = inputParser;
             addParameter(p, 'batch_mode', false, @islogical);
             parse(p, remaining_args{:});
-            batch_mode = p.Results.batch_mode;
+            % batch_mode = p.Results.batch_mode; % Currently unused
         end
     else
         error('compute_text_based_ia: Either config file path or individual parameters must be provided.');
@@ -218,14 +226,37 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     opts = detectImportOptions(txtFilePath, 'Delimiter', '\t');
     opts.VariableNamingRule = 'preserve';
     
-    % Preserve whitespace in regions - important for word boundary detection
-    for i = 1:length(regionNames)
-        opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve');
-    end
-
     % Display detected columns for debugging
     fprintf('\nDetected column names in file:\n');
     disp(opts.VariableNames);
+    
+    % CRITICAL: Validate and correct region names BEFORE setvaropts
+    % This prevents setvaropts from failing with case-mismatched column names
+    fprintf('\nValidating region columns before import options:\n');
+    for i = 1:length(regionNames)
+        [correctedName, found] = findBestColumnMatch(opts.VariableNames, regionNames{i});
+        if found
+            if ~strcmp(regionNames{i}, correctedName)
+                fprintf('✓ Found region "%s" as "%s"\n', regionNames{i}, correctedName);
+                regionNames{i} = correctedName;
+            else
+                fprintf('✓ Found region: %s\n', regionNames{i});
+            end
+        else
+            fprintf('✗ Missing region column: %s\n', regionNames{i});
+            error('Region column "%s" not found in data file.\nAvailable columns: %s', regionNames{i}, strjoin(opts.VariableNames, ', '));
+        end
+    end
+
+    % Preserve whitespace in regions and handle quotes properly (using corrected names)
+    for i = 1:length(regionNames)
+        try
+            opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve', 'QuoteRule', 'keep');
+        catch
+            % Fall back for older MATLAB versions
+            opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve');
+        end
+    end
     
     % Read the data table
     data = readtable(txtFilePath, opts);
@@ -250,8 +281,35 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
 
     fprintf('Using condition column: %s\n', conditionColName);
     fprintf('Using item column: %s\n', itemColName);
+    
+    % Validate condition type columns (used for BDF descriptions)
+    fprintf('\nValidating condition type columns for BDF descriptions:\n');
+    if iscell(conditionTypeColName)
+        conditionColNames = conditionTypeColName;
+    else
+        conditionColNames = {conditionTypeColName};
+    end
+    
+    missingCondTypeCols = {};
+    for colIdx = 1:length(conditionColNames)
+        colName = conditionColNames{colIdx};
+        [~, foundCol] = findBestColumnMatch(data.Properties.VariableNames, colName);
+        if foundCol
+            fprintf('✓ Found condition type column: %s\n', colName);
+        else
+            fprintf('✗ Missing condition type column: %s\n', colName);
+            missingCondTypeCols{end+1} = colName;
+        end
+    end
+    
+    if ~isempty(missingCondTypeCols)
+        error('Missing condition type columns: %s\nAvailable columns: %s\nPlease check the "Condition Label Column Name(s)" field in the GUI.', ...
+              strjoin(missingCondTypeCols, ', '), strjoin(data.Properties.VariableNames, ', '));
+    else
+        fprintf('✓ All condition type columns found!\n');
+    end
 
-
+    % Region names were already validated and corrected before table import
 
     %% Step 3: Calculate region and word boundaries for each stimulus
     % Create containers to store region and word boundary information
@@ -357,13 +415,14 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
             condDescParts = {};
             for colIdx = 1:length(conditionColNames)
                 colName = conditionColNames{colIdx};
-                if isfield(data, colName)
-                    colVal = data.(colName)(iRow);
+                [actualColName, foundCol] = findBestColumnMatch(data.Properties.VariableNames, colName);
+                if foundCol
+                    colVal = data.(actualColName)(iRow);
                     if iscell(colVal), colVal = colVal{1}; end
                     condDescParts{end+1} = char(string(colVal));
                 end
             end
-            condDesc = strjoin(condDescParts, '_');
+            condDesc = strjoin(condDescParts, ' ');
             % Get condition number for numeric storage
             conditionNum = data.(conditionColName)(iRow);
             if iscell(conditionNum), conditionNum = conditionNum{1}; end
@@ -447,23 +506,21 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
         eventTypeNoSpace = strrep(eventType, ' ', '');
         
         % Check for trial start/end markers or trigger events
-        if strcmp(eventTypeNoSpace, strrep(startCode, ' ', ''))
+        if flexibleTriggerMatch(eventTypeNoSpace, strrep(startCode, ' ', ''))
             % Trial start - reset tracking variables
             trialRunning = true;
             currentItem = [];
             currentCond = [];
             lastValidKey = '';
-        elseif strcmp(eventTypeNoSpace, strrep(endCode, ' ', ''))
+        elseif flexibleTriggerMatch(eventTypeNoSpace, strrep(endCode, ' ', ''))
             % Trial end
             trialRunning = false;
-        elseif trialRunning && startsWith(eventType, 'S')
-            % This is a stimulus trigger event during an active trial
-            
-            % Check if it's an item trigger
-            if any(strcmp(eventTypeNoSpace, itemTriggersNoSpace))
+        elseif trialRunning
+            % Check if it's an item trigger (flexible matching)
+            if any(cellfun(@(x) flexibleTriggerMatch(eventTypeNoSpace, x), itemTriggersNoSpace))
                 currentItem = str2double(regexp(eventTypeNoSpace, '\d+', 'match', 'once'));
-            % Check if it's a condition trigger
-            elseif any(strcmp(eventTypeNoSpace, conditionTriggersNoSpace))
+            % Check if it's a condition trigger (flexible matching)
+            elseif any(cellfun(@(x) flexibleTriggerMatch(eventTypeNoSpace, x), conditionTriggersNoSpace))
                 currentCond = str2double(regexp(eventTypeNoSpace, '\d+', 'match', 'once'));
             end
             
@@ -492,14 +549,12 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                 end
                 
                 % For fixation events, determine which region they fall within
-                if startsWith(EEG.event(iEvt).type, 'R_fixation')
-                    % Get the fixation position, trying different possible field names
-                    if isfield(EEG.event(iEvt), 'fix_avgpos_x')
-                        fix_pos_x = EEG.event(iEvt).fix_avgpos_x;
-                    elseif isfield(EEG.event(iEvt), 'px')
-                        fix_pos_x = EEG.event(iEvt).px;
+                if startsWith(EEG.event(iEvt).type, fixationType)
+                    % Get the fixation position using the user-specified field name
+                    if isfield(EEG.event(iEvt), fixationXField)
+                        fix_pos_x = EEG.event(iEvt).(fixationXField);
                     else
-                        warning('No x position field found for event %d. Skipping region assignment.', iEvt);
+                        warning('No x position field "%s" found for event %d. Skipping region assignment.', fixationXField, iEvt);
                         continue;
                     end
                     
@@ -511,7 +566,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
                         fix_pos_x = str2double(fix_pos_x);
                     end
                     if ~isnumeric(fix_pos_x) || isnan(fix_pos_x)
-                        warning('Invalid fix_avgpos_x at event %d. Skipping event.', iEvt);
+                        warning('Invalid %s at event %d. Skipping event.', fixationXField, iEvt);
                         continue;
                     end
                     
@@ -640,6 +695,32 @@ function [bestMatch, found] = findBestColumnMatch(availableColumns, requestedCol
     % No match found
     bestMatch = requestedColumn;
     found = false;
+end
+
+%% Helper function: flexibleTriggerMatch
+function isMatch = flexibleTriggerMatch(eventTrigger, configTrigger)
+    % FLEXIBLETRIGGERMATCH - Flexible trigger code matching
+    % Handles cases where user enters "212" but data has "S212" or "R212"
+    % BUT "R212" does NOT match "S212" - different prefixes must match exactly
+    
+    % First try exact match
+    if strcmp(eventTrigger, configTrigger)
+        isMatch = true;
+        return;
+    end
+    
+    % Check if config (user input) is just numbers (no letter prefix)
+    configIsNumberOnly = ~isempty(regexp(configTrigger, '^\d+$', 'once'));
+    
+    if configIsNumberOnly
+        % User entered just numbers, so match any prefix in event data
+        eventNum = regexp(eventTrigger, '\d+', 'match', 'once');
+        configNum = regexp(configTrigger, '\d+', 'match', 'once');
+        isMatch = ~isempty(eventNum) && ~isempty(configNum) && strcmp(eventNum, configNum);
+    else
+        % User entered with prefix, must match exactly (already checked above)
+        isMatch = false;
+    end
 end
 
 %% Helper function: load_eyesort_config

@@ -42,60 +42,62 @@ function [EEG, com] = pop_load_datasets(EEG)
 
     % supergui geometry
     geomhoriz = { ...
-        [1 1 1.26], ... Row 1
-        [1 1],      ... Row 2
+        1,          ... Row 1: Single Dataset Pipeline
+        [1 0.5], ... Row 1
         1,          ... Row 3
-        [1 1 1],    ... Row 4
-        1,          ... Row 5: Spacer
-        1,          ... Row 6
-        [1 1 1.26], ... Row 6
-        1,          ... Row 7 (directory listbox)
-        1,          ... Row 8: Spacer
-        [1 1 1.26], ... Row 9
-        1,          ... Row 10: Spacer
-        1,          ... Row 11 (
-        [1 1 1.26], ... Row 12
+        [0.5 1],          ... Row 4: Remove Selected button for individual datasets
+        1,          ... Row 5: Spacer          ... Row 6: Spacer
+        1,          ... Row 7: Spacer
+        [1 0.5], ... Row 8
+        1,          ... Row 9 (directory listbox)
+        [0.5 1],          ... Row 10: Remove Selected button for batch directory
+        1,          ... Row 11: Spacer
+        [1 0.5], ... Row 11
+        1,          ... Row 12 (output directory listbox)
+        [0.5 1],          ... Row 13: Remove Selected button for output directory
+        1,          ... Row 14: Spacer
+        [1 0.5 0.5], ... Row 15: Control buttons
     };
     
-    geomvert = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    geomvert = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
     
     uilist = { ...
-        % Row 1: Input EEG datasets
-        {'Style', 'text', 'string', 'Load individual dataset:','FontWeight', 'bold', 'FontSize', 12}, ...
-        {}, ...
+        {'Style', 'text', 'string', '──────────Single Dataset Pipeline───────────────────────────────────', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ... Row 1: Single Dataset Pipeline
+        ...
+        {'Style', 'text', 'string', 'Load individual dataset:', 'FontSize', 12}, ...
         {'Style', 'pushbutton', 'string', 'Browse Files', 'callback', @(~,~) browse_for_datasets()}, ...
-        ... Row 2: Selected Datasets label
-        {'Style', 'text', 'string', 'Selected Dataset:', 'FontSize', 10, 'HorizontalAlignment', 'left'}, ...
-        {}, ...
         ... Row 3: 
         {'Style', 'listbox', 'tag', 'datasetList', 'string', selected_datasets, 'Max', 10, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
         ... Row 4:
         {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_dataset()}, ...
-        {'Style', 'pushbutton', 'string', 'Clear All', 'callback', @(~,~) clear_all_datasets()}, ...
         {}, ...
-        ... Row 5: Separator
-        {'Style', 'text', 'string', '──────────OR──────────────────────────', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ...
-        ... Row 6: Directory selection option
-        {'Style', 'text', 'string', 'Batch processing multiple datasets:', 'FontWeight', 'bold', 'FontSize', 12}, ...
         ...
-        {'Style', 'text', 'string', 'Select the directory containing the dataset(s):', 'FontSize', 12}, ...
-        {}, ...
+        {}, ... 
+        ... Row 5: Separator
+        {'Style', 'text', 'string', '──────────Multiple Datasets Pipeline───────────────────────────────────', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ...
+        ... Row 6: Directory selection option
+        {'Style', 'text', 'string', 'Select the Input Directory containing the datasets:', 'FontSize', 12}, ...
         {'Style', 'pushbutton', 'string', 'Browse Dataset(s) Directory', 'callback', @(~,~) browse_for_directory()}, ...
-        ... Row 7: Selected directory listbox
+        ... Row 9: Selected directory listbox
         {'Style', 'listbox', 'tag', 'batchDirList', 'string', {}, 'Max', 1, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
-        ... Row 8: Spacer
+        ... Row 10: Remove Selected button for batch directory
+        {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_batch_directory()}, ...
+        {}, ...
+        ...
         {}, ...
         ... Row 9: Output directory selection
-        {'Style', 'text', 'string', 'Output Directory (for processed datasets):', 'FontSize', 12}, ...
-        {}, ...
+        {'Style', 'text', 'string', 'Select the Output Directory where the processed datasets will be saved:', 'FontSize', 12}, ...
         {'Style', 'pushbutton', 'string', 'Browse Output Directory', 'callback', @(~,~) browse_for_output()}, ...
-        ... Row 10: Selected output directory listbox
+        ... Row 12: Selected output directory listbox
         {'Style', 'listbox', 'tag', 'outputDirList', 'string', {}, 'Max', 1, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
-        ... Row 11: Spacer
+        ... Row 13: Remove Selected button for output directory
+        {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_output_directory()}, ...
         {}, ...
-        ... Row 12: Control buttons
+        ... Row 14: Spacer
+        {}, ...
+        ... Row 15: Control buttons
+        {}, ...
         {'Style', 'pushbutton', 'string', 'Cancel', 'callback', @(~,~) cancel_button()}, ...
-        {}, ...
         {'Style', 'pushbutton', 'string', 'Confirm', 'callback', @(~,~) confirm_selection()}, ...
     };
     
@@ -106,6 +108,9 @@ function [EEG, com] = pop_load_datasets(EEG)
              'geomvert',  geomvert, ...
              'uilist',    uilist, ...
              'title',     'Load EEG Dataset(s)');
+         
+    % Bring window to front
+    figure(hFig);
 
     % Variables to store directory paths
     selectedDir = '';
@@ -117,8 +122,9 @@ function [EEG, com] = pop_load_datasets(EEG)
     function browse_for_datasets(~,~)
         [files, path] = uigetfile( ...
             {'*.set', 'EEG dataset files (*.set)'}, ...
-            'Select EEG Datasets', ...
-            'MultiSelect', 'on');
+            'Select EEG Dataset', ...
+            'MultiSelect', 'off');
+        figure(hFig); % Bring GUI back to front
 
         if isequal(files, 0)
             return; % user canceled
@@ -145,6 +151,7 @@ function [EEG, com] = pop_load_datasets(EEG)
     % -- BROWSE FOR DIRECTORY --
     function browse_for_directory(~,~)
         dir_path = uigetdir('', 'Select Directory with EEG Datasets');
+        figure(hFig); % Bring GUI back to front
         
         if isequal(dir_path, 0)
             return; % user canceled
@@ -163,6 +170,7 @@ function [EEG, com] = pop_load_datasets(EEG)
     % -- BROWSE FOR OUTPUT DIRECTORY --
     function browse_for_output(~,~)
         dir_path = uigetdir('', 'Select Output Directory for Processed Files');
+        figure(hFig); % Bring GUI back to front
         
         if isequal(dir_path, 0)
             return; % user canceled
@@ -187,11 +195,18 @@ function [EEG, com] = pop_load_datasets(EEG)
         set(hList, 'string', selected_datasets, 'value', 1);
     end
 
-    % -- CLEAR ALL DATASETS --
-    function clear_all_datasets(~,~)
-        selected_datasets = {};
-        hList = findobj(hFig, 'tag', 'datasetList');
-        set(hList, 'string', selected_datasets, 'value', 1);
+    % -- REMOVE BATCH DIRECTORY --
+    function remove_batch_directory(~,~)
+        selectedDir = '';
+        hList = findobj(hFig, 'tag', 'batchDirList');
+        set(hList, 'string', {}, 'value', 1);
+    end
+
+    % -- REMOVE OUTPUT DIRECTORY --
+    function remove_output_directory(~,~)
+        outputDir = '';
+        hList = findobj(hFig, 'tag', 'outputDirList');
+        set(hList, 'string', {}, 'value', 1);
     end
 
     % -- CANCEL BUTTON --
@@ -211,6 +226,12 @@ function [EEG, com] = pop_load_datasets(EEG)
         % Check if output directory is selected when using batch processing
         if ~isempty(selectedDir) && isempty(outputDir)
             errordlg('Please select an output directory for batch processing.', 'Error');
+            return;
+        end
+        
+        % Check for mutually exclusive pipeline selection
+        if ~isempty(selected_datasets) && (~isempty(selectedDir) || ~isempty(outputDir))
+            errordlg('Cannot use both single dataset and batch processing pipelines simultaneously. Please clear one before proceeding.', 'Error');
             return;
         end
 
@@ -305,7 +326,7 @@ function [EEG, com] = pop_load_datasets(EEG)
                     msgbox(sprintf(['Successfully prepared %d datasets for batch processing!%s\n\n'...
                                    'Next steps:\n'...
                                    '1. Configure Text Interest Areas (step 2)\n'...
-                                   '2. Configure and Apply Labels (step 3)\n\n'...
+                                   '2. Configure and Apply Eye-Event Labels (step 3)\n\n'...
                                    'Each step will process datasets one-at-a-time for memory efficiency.'], valid_count, memory_warning), 'Batch Setup Complete');
                 else
                     errordlg('No valid datasets were found.', 'Validation Failed');
@@ -392,7 +413,7 @@ function [EEG, com] = pop_load_datasets(EEG)
             msgbox(sprintf(['Success: Dataset loaded successfully into EEGLAB.\n\n', ...
             'Next steps:\n'...
             '1. Configure Text Interest Areas (step 2)\n'...
-            '2. Configure and Apply Labels (step 3)\n']));
+            '2. Configure and Apply Eye-Event Labels (step 3)\n']));
         end
         
         close(hFig);

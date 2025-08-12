@@ -472,22 +472,22 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
             continue;
         end
         
-        % Check for condition and item labels (vectorized)
-        if ~isempty(conditions) && conditionNumbers(mm) > 0
-            if ~any(conditionNumbers(mm) == conditions)
+        % Check for condition and item labels (vectorized) - MUST match if specified
+        if ~isempty(conditions)
+            if conditionNumbers(mm) <= 0 || ~any(conditionNumbers(mm) == conditions)
                 continue;
             end
         end
         
-        if ~isempty(items) && itemNumbers(mm) > 0
-            if ~any(itemNumbers(mm) == items)
+        if ~isempty(items)
+            if itemNumbers(mm) <= 0 || ~any(itemNumbers(mm) == items)
                 continue;
             end
         end
         
-        % Time-locked region label (vectorized)
-        if ~isempty(timeLockedRegions) && ~isempty(currentRegions{mm})
-            if ~any(strcmp(currentRegions{mm}, timeLockedRegions))
+        % Time-locked region label (vectorized) - MUST have valid region if specified
+        if ~isempty(timeLockedRegions)
+            if isempty(currentRegions{mm}) || ~any(strcmpi(currentRegions{mm}, timeLockedRegions))
                 continue;
             end
         end
@@ -531,14 +531,14 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
         
         % Previous region labeling (optimized)
         if ~isempty(prevRegions)
-            if isempty(lastRegionVisited{mm}) || ~any(strcmp(lastRegionVisited{mm}, prevRegions))
+            if isempty(lastRegionVisited{mm}) || ~any(strcmpi(lastRegionVisited{mm}, prevRegions))
                 continue;
             end
         end
         
         % Next region labeling (using pre-computed field)
         if ~isempty(nextRegions)
-            if isempty(nextRegionVisited{mm}) || ~any(strcmp(nextRegionVisited{mm}, nextRegions))
+            if isempty(nextRegionVisited{mm}) || ~any(strcmpi(nextRegionVisited{mm}, nextRegions))
                 continue;
             end
         end
@@ -552,7 +552,7 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
                 % Single fixation - using next_fixation_region for efficiency
                 if isfield(EEG.event(mm), 'next_fixation_region') && fixationInPass(mm) == 1
                     nextFixRegion = EEG.event(mm).next_fixation_region;
-                    passesFixationType = isempty(nextFixRegion) || ~strcmp(currentRegions{mm}, nextFixRegion);
+                    passesFixationType = isempty(nextFixRegion) || ~strcmpi(currentRegions{mm}, nextFixRegion);
                 else
                     % Fallback to group-based check
                     if trialNumbers(mm) > 0 && ~isempty(currentRegions{mm}) && regionPassNumbers(mm) > 0
@@ -603,7 +603,7 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
                         % Single fixation - using next_fixation_region for efficiency
                         if isfield(EEG.event(mm), 'next_fixation_region') && fixationInPass(mm) == 1
                             nextFixRegion = EEG.event(mm).next_fixation_region;
-                            if isempty(nextFixRegion) || ~strcmp(currentRegions{mm}, nextFixRegion)
+                            if isempty(nextFixRegion) || ~strcmpi(currentRegions{mm}, nextFixRegion)
                                 passesFixationType = true;
                                 break;
                             end
@@ -839,7 +839,7 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
             % Store actual strings in dataset (only on labeled events)
             labeledEEG.event(mm).bdf_condition_description = char(conditionDesc);
             labeledEEG.event(mm).bdf_label_description = char(labelDescription);
-            labeledEEG.event(mm).bdf_full_description = strcat(char(conditionDesc), '_', char(labelDescription));
+            labeledEEG.event(mm).bdf_full_description = [char(conditionDesc) ' ' char(labelDescription)];
         end
     end
     
