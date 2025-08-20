@@ -251,7 +251,7 @@ function EEG = process_single_dataset(EEG, txtFilePath, offset, pxPerChar, ...
     % Preserve whitespace in regions and handle quotes properly (using corrected names)
     for i = 1:length(regionNames)
         try
-            opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve', 'QuoteRule', 'keep');
+            opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve', 'QuoteRule', 'remove');
         catch
             % Fall back for older MATLAB versions
             opts = setvaropts(opts, regionNames{i}, 'WhitespaceRule', 'preserve');
