@@ -462,6 +462,7 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
     fprintf('Pre-computation complete. Processing %d fixation events...\n', length(fixationIndices));
     
     % ========== OPTIMIZED LABELING LOOP ==========
+    bdf_fields_initialized = false;  % Flag to track BDF field initialization
     for i = 1:length(fixationIndices)
         mm = fixationIndices(i);
         evt = EEG.event(mm);
@@ -817,6 +818,18 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
         labeledEEG.event(mm).eyesort_label_code = labelStr;
         labeledEEG.event(mm).eyesort_full_code = newType;
         
+        % Initialize BDF description fields for ALL events (only once, after eyesort fields)
+        % Only initialize if fields don't exist to preserve existing descriptions
+        if ~bdf_fields_initialized
+            if ~isfield(labeledEEG.event, 'bdf_condition_description')
+                fprintf('Initializing BDF description fields for all events...\n');
+                [labeledEEG.event.bdf_condition_description] = deal('');
+                [labeledEEG.event.bdf_label_description] = deal('');
+                [labeledEEG.event.bdf_full_description] = deal('');
+            end
+            bdf_fields_initialized = true;
+        end
+        
         % Add BDF description columns directly (only to labeled events to minimize 7.3 risk)
         if ~isempty(labelDescription)
             % Get condition description string from lookup
@@ -837,9 +850,27 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
             end
             
             % Store actual strings in dataset (only on labeled events)
+            % Handle empty strings properly to avoid concatenation issues
+            if isempty(conditionDesc)
+                conditionDesc = '';
+            end
+            if isempty(labelDescription)
+                labelDescription = '';
+            end
+            
             labeledEEG.event(mm).bdf_condition_description = char(conditionDesc);
             labeledEEG.event(mm).bdf_label_description = char(labelDescription);
-            labeledEEG.event(mm).bdf_full_description = [char(conditionDesc) ' ' char(labelDescription)];
+            
+            % Safe concatenation that handles empty strings
+            if isempty(conditionDesc) && isempty(labelDescription)
+                labeledEEG.event(mm).bdf_full_description = '';
+            elseif isempty(conditionDesc)
+                labeledEEG.event(mm).bdf_full_description = char(labelDescription);
+            elseif isempty(labelDescription)
+                labeledEEG.event(mm).bdf_full_description = char(conditionDesc);
+            else
+                labeledEEG.event(mm).bdf_full_description = [char(conditionDesc) ' ' char(labelDescription)];
+            end
         end
     end
     
@@ -850,7 +881,48 @@ function labeledEEG = label_dataset_internal(EEG, conditions, items, timeLockedR
         fprintf('Warning: Found %d events with conflicting codes (%.1f%% of matched events).\n', ...
                 length(conflictingEvents), conflictPercentage);
         fprintf('These events match multiple label criteria.\n');
-        fprintf('Keeping new codes by default. Use GUI for interactive conflict resolution.\n');
+        
+        % Ask user whether to replace existing codes
+        choice = questdlg(sprintf(['Found %d events that already have labels but match your current filter criteria.\n\n' ...
+                                  'Do you want to replace the existing labels with the new ones?'], ...
+                                  length(conflictingEvents)), ...
+                         'Conflicting Labels Found', 'Yes', 'No', 'No');
+        
+        if strcmp(choice, 'Yes')
+            % Replace existing codes
+            fprintf('Replacing existing codes with new labels...\n');
+            for i = 1:length(conflictingEvents)
+                evt_idx = conflictingEvents{i}.event_index;
+                new_code = conflictingEvents{i}.new_code;
+                
+                % Update the event with new code
+                labeledEEG.event(evt_idx).type = new_code;
+                labeledEEG.event(evt_idx).eyesort_full_code = new_code;
+                labeledEEG.event(evt_idx).eyesort_condition_code = new_code(1:2);
+                labeledEEG.event(evt_idx).eyesort_region_code = new_code(3:4);
+                labeledEEG.event(evt_idx).eyesort_label_code = new_code(5:6);
+                
+                % Update BDF descriptions with current label description
+                if ~isempty(labelDescription)
+                    % Get existing condition description
+                    conditionDesc = '';
+                    if isfield(labeledEEG.event(evt_idx), 'bdf_condition_description')
+                        conditionDesc = labeledEEG.event(evt_idx).bdf_condition_description;
+                    end
+                    
+                    % Update descriptions
+                    labeledEEG.event(evt_idx).bdf_label_description = char(labelDescription);
+                    if isempty(conditionDesc)
+                        labeledEEG.event(evt_idx).bdf_full_description = char(labelDescription);
+                    else
+                        labeledEEG.event(evt_idx).bdf_full_description = [char(conditionDesc) ' ' char(labelDescription)];
+                    end
+                end
+            end
+            fprintf('Replaced %d conflicting labels.\n', length(conflictingEvents));
+        else
+            fprintf('Keeping existing codes. Skipped %d conflicting events.\n', length(conflictingEvents));
+        end
     end
     
     % Store the number of matched events for reference
