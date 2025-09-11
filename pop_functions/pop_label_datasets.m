@@ -78,32 +78,7 @@ function [EEG, com] = pop_label_datasets(EEG)
         return;
     end
     
-    % Extract available labeling options from EEG events
-    conditionSet = [];
-    itemSet = [];
-    
-    if isfield(EEG.event, 'condition_number')
-        condVals = zeros(1, length(EEG.event));
-        for kk = 1:length(EEG.event)
-            if isfield(EEG.event(kk), 'condition_number') && ~isempty(EEG.event(kk).condition_number)
-                condVals(kk) = EEG.event(kk).condition_number;
-            else
-                condVals(kk) = NaN;
-            end
-        end
-        conditionSet = unique(condVals(~isnan(condVals) & condVals > 0));
-    end
-    if isfield(EEG.event, 'item_number')
-        itemVals = zeros(1, length(EEG.event));
-        for kk = 1:length(EEG.event)
-            if isfield(EEG.event(kk), 'item_number') && ~isempty(EEG.event(kk).item_number)
-                itemVals(kk) = EEG.event(kk).item_number;
-            else
-                itemVals(kk) = NaN;
-            end
-        end
-        itemSet = unique(itemVals(~isnan(itemVals) & itemVals > 0));
-    end
+    % Note: EEG event validation occurs in the core labeling function
     
     % Extract region names, maintaining user-specified order
     if isfield(EEG, 'region_names') && ~isempty(EEG.region_names)
@@ -322,7 +297,7 @@ function [EEG, com] = pop_label_datasets(EEG)
         {}, ...
         {'Style', 'pushbutton', 'String', 'Cancel', 'callback', @(~,~) cancel_button}, ...
         {'Style', 'pushbutton', 'String', 'Apply Additional Label', 'callback', @(~,~) apply_label}, ...
-{'Style', 'pushbutton', 'String', 'Finish Labeling Process', 'callback', @(~,~) finish_labeling} ...
+        {'Style', 'pushbutton', 'String', 'Finish Labeling Process', 'callback', @(~,~) finish_labeling} ...
     }];
     
     % Combine all parts
@@ -399,7 +374,7 @@ function [EEG, com] = pop_label_datasets(EEG)
             com = sprintf('EEG = pop_label_datasets(EEG); %% Batch labeling completed with %d labels applied', current_batch_label_count);
             
             % Show completion message with total events processed and WAIT for user acknowledgment
-            total_events_msg = sprintf('Batch labeling complete!\n\n%d datasets processed with %d labels applied.\n\nFinal label processed events across all datasets.', processed_count, current_batch_label_count);
+            total_events_msg = sprintf('Batch labeling complete!\n\n%d labels applied.\n\nAll datasets have been processed and are ready for BDF generation.', current_batch_label_count);
             h_msg = msgbox(total_events_msg, 'Batch Complete');
             waitfor(h_msg); % Wait for user to close the message box
             
@@ -709,6 +684,13 @@ function [EEG, com] = pop_label_datasets(EEG)
         try
             % Handle batch mode
             if batch_mode
+                % Detect existing labels in first dataset to set proper starting count
+                if current_batch_label_count == 0
+                    first_dataset = pop_loadset('filename', batchFilePaths{1});
+                    if isfield(first_dataset, 'eyesort_label_count') && ~isempty(first_dataset.eyesort_label_count)
+                        current_batch_label_count = first_dataset.eyesort_label_count;
+                    end
+                end
                 % Increment label count for batch processing
                 current_batch_label_count = current_batch_label_count + 1;
                 
@@ -748,7 +730,7 @@ function [EEG, com] = pop_label_datasets(EEG)
                     com = sprintf('EEG = pop_label_datasets(EEG); %% Batch labeling completed with %d labels applied', current_batch_label_count);
                     
                     % Show completion message with total events processed and WAIT for user acknowledgment
-                    total_events_msg = sprintf('Batch labeling complete!\n\n%d datasets processed with %d labels applied.\n\nFinal label processed events across all datasets.', processed_count, current_batch_label_count);
+                    total_events_msg = sprintf('Batch labeling complete!\n\n%d datasets processed with %d labels applied.\n\nAll datasets are ready for BDF generation.', length(batchFilePaths), current_batch_label_count);
                     h_msg = msgbox(total_events_msg, 'Batch Complete');
                     waitfor(h_msg); % Wait for user to close the message box
                     
@@ -759,7 +741,7 @@ function [EEG, com] = pop_label_datasets(EEG)
                     
                 else
                     % Show progress message but keep GUI open
-                    msgbox(sprintf('Label %02d applied to all %d datasets!\n\nYou can now configure and apply another label.', current_batch_label_count, processed_count), 'Batch Label Applied', 'help');
+                    msgbox(sprintf('Label %02d applied to all %d datasets!\n\nYou can now configure and apply another label.', current_batch_label_count, length(batchFilePaths)), 'Batch Label Applied', 'help');
                     
                     % Reset GUI for next label
                     reset_gui_for_next_label();
@@ -892,8 +874,11 @@ function [EEG, com] = pop_label_datasets(EEG)
                         end
                     end
                     
-                    % CRITICAL: Reset label count and ensure dataset integrity
-                    tempEEG.eyesort_label_count = labelNum - 1; % Will be incremented by core function
+                    % CRITICAL: Preserve existing label count for previously labeled datasets
+                    if ~isfield(tempEEG, 'eyesort_label_count')
+                        tempEEG.eyesort_label_count = labelNum - 1; % Will be incremented by core function
+                    end
+                    % For previously labeled datasets, keep existing count (will be incremented by core function)
                     
                     % Verify dataset has required fields for labeling
                     if ~isfield(tempEEG, 'eyesort_field_names') || isempty(tempEEG.eyesort_field_names)

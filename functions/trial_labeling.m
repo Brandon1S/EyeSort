@@ -55,10 +55,9 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
     visitedRegions = containers.Map('KeyType', 'char', 'ValueType', 'logical');
     regionFixationCounts = containers.Map('KeyType', 'char', 'ValueType', 'double');
     previousWord = '';
-    previousRegion = '';
+    currentTrialPass = 1;  % Global pass counter for the trial
 
     % New maps for tracking region passes and fixation counts within passes
-    regionPassCounts = containers.Map('KeyType', 'char', 'ValueType', 'double');       % Tracks number of passes through each region
     currentPassFixationCounts = containers.Map('KeyType', 'char', 'ValueType', 'double'); % Tracks fixation count in current pass
     lastRegionVisited = '';  % Tracks the actual last region visited (different from previousRegion which tracks the previous fixation)
 
@@ -122,11 +121,10 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             visitedRegions = containers.Map('KeyType', 'char', 'ValueType', 'logical');
             regionFixationCounts = containers.Map('KeyType', 'char', 'ValueType', 'double');
             % Reset pass tracking variables
-            regionPassCounts = containers.Map('KeyType', 'char', 'ValueType', 'double');
             currentPassFixationCounts = containers.Map('KeyType', 'char', 'ValueType', 'double');
             lastRegionVisited = '';
             previousWord = '';
-            previousRegion = '';
+            currentTrialPass = 1;  % Reset pass counter for new trial
             sentenceActive = ~useSentenceCodes;  % Reset sentence state for new trial
             % Also, clear any last region storage from previous trial:
             inEndRegion = false;
@@ -254,7 +252,6 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                         
                         % Update region-related fields
                         EEG.event(iEvt).current_region = regionName;
-                        EEG.event(iEvt).previous_fixation_region = previousRegion;
                         
                         % Update region fixation counts (using region number as key)
                         if ~isKey(regionFixationCounts, regionKey)
@@ -263,67 +260,40 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                             regionFixationCounts(regionKey) = regionFixationCounts(regionKey) + 1;
                         end
                         
-                        % ======= NEW PASS TRACKING LOGIC =======
-                        % If this is our first fixation in any region, initialize pass tracking
-                        if isempty(lastRegionVisited)
-                            lastRegionVisited = regionName;
-                            regionPassCounts(regionName) = 1;
-                            currentPassFixationCounts(regionName) = 1;
-                            EEG.event(iEvt).region_pass_number = 1;
-                            EEG.event(iEvt).fixation_in_pass = 1;
-                            % First fixation has no last region visited
-                            EEG.event(iEvt).last_region_visited = '';
-                        else
-                            % Check if we're in the same region as before
-                            if strcmpi(regionName, previousRegion)
-                                % Same region, increment fixation count in current pass
-                                currentPassFixationCounts(regionName) = currentPassFixationCounts(regionName) + 1;
-                                EEG.event(iEvt).region_pass_number = regionPassCounts(regionName); 
-                                EEG.event(iEvt).fixation_in_pass = currentPassFixationCounts(regionName);
-                                % When still in the same region, last_region_visited should be the 
-                                % last different region visited before entering this region
-                                if iEvt > 1 && isfield(EEG.event(iEvt-1), 'last_region_visited') && ~isempty(EEG.event(iEvt-1).last_region_visited)
-                                    EEG.event(iEvt).last_region_visited = EEG.event(iEvt-1).last_region_visited;
-                                else
-                                    % Find the last non-empty last_region_visited looking backwards
-                                    lastVisitedFound = false;
-                                    for lookBack = iEvt-1:-1:1
-                                        if isfield(EEG.event(lookBack), 'last_region_visited') && ...
-                                           ~isempty(EEG.event(lookBack).last_region_visited)
-                                            EEG.event(iEvt).last_region_visited = EEG.event(lookBack).last_region_visited;
-                                            lastVisitedFound = true;
-                                            break;
-                                        end
-                                    end
-                                    if ~lastVisitedFound
-                                        % If we can't find any, use an empty string
-                                        EEG.event(iEvt).last_region_visited = '';
-                                    end
-                                end
+                        % ======= REGRESSION DETECTION AND PASS TRACKING =======
+                        % Calculate regression once, use for both pass tracking and regression fields
+                        if ~isempty(previousWord)
+                            [prev_region, prev_word_num] = parse_word_region(previousWord);
+                            isRegression = (curr_region < prev_region);
+                            
+                            % Use for pass tracking
+                            if isRegression
+                                currentTrialPass = currentTrialPass + 1;
+                            end
+                            
+                            % Set regression fields
+                            EEG.event(iEvt).is_region_regression = isRegression;
+                            if curr_region == prev_region
+                                EEG.event(iEvt).is_word_regression = (curr_word_num < prev_word_num);
                             else
-                                % Moving to a different region
-                                % Update last region visited - it's the region we're coming from
-                                EEG.event(iEvt).last_region_visited = previousRegion;
-                                lastRegionVisited = previousRegion; % Previous fixation's region becomes the last one visited
-                                
-                                % Check if we've been to this region before during this trial
-                                if isKey(regionPassCounts, regionName)
-                                    % Been here before, increment pass counter
-                                    regionPassCounts(regionName) = regionPassCounts(regionName) + 1;
-                                    % Reset fixation counter for new pass
-                                    currentPassFixationCounts(regionName) = 1;
-                                else
-                                    % First time in this region
-                                    regionPassCounts(regionName) = 1;
-                                    currentPassFixationCounts(regionName) = 1;
-                                end
-                                
-                                % Store the pass information in the event
-                                EEG.event(iEvt).region_pass_number = regionPassCounts(regionName);
-                                EEG.event(iEvt).fixation_in_pass = 1; % First fixation in this pass
+                                EEG.event(iEvt).is_word_regression = false;
                             end
                         end
-                        % ======= END NEW PASS TRACKING LOGIC =======
+                        
+                        % Set the pass number for this fixation
+                        EEG.event(iEvt).region_pass_number = currentTrialPass;
+                        
+                        % Track fixation within current pass
+                        if isempty(lastRegionVisited) || ~strcmpi(regionName, lastRegionVisited)
+                            % First fixation in this region for current pass
+                            currentPassFixationCounts(regionName) = 1;
+                            lastRegionVisited = regionName;
+                        else
+                            % Continuing in same region, same pass
+                            currentPassFixationCounts(regionName) = currentPassFixationCounts(regionName) + 1;
+                        end
+                        EEG.event(iEvt).fixation_in_pass = currentPassFixationCounts(regionName);
+                        % ======= END REGION PASS TRACKING LOGIC =======
                         
                         % Update first-pass region information
                         % Only mark as first pass if:
@@ -352,16 +322,7 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                         EEG.event(iEvt).total_fixations_in_word = wordFixationCounts(currentWord);
                         EEG.event(iEvt).total_fixations_in_region = regionFixationCounts(regionKey);
                         
-                        % Check for regressions (for regions other than our Ending-specific definition)
-                        if ~isempty(previousWord)
-                            [prev_region, prev_word_num] = parse_word_region(previousWord);
-                            EEG.event(iEvt).is_region_regression = (curr_region < prev_region);
-                            if curr_region == prev_region
-                                EEG.event(iEvt).is_word_regression = (curr_word_num < prev_word_num);
-                            else
-                                EEG.event(iEvt).is_word_regression = (curr_region < prev_region);
-                            end
-                        end
+
                         
                         % Store trial metadata ONLY if event has proper region assignment
                         if ~isempty(EEG.event(iEvt).current_region) && ~strcmpi(EEG.event(iEvt).current_region, '')
@@ -427,15 +388,14 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
 
                         % Now update the previous trackers AFTER handling the last region behavior.
                         previousWord = currentWord;
-                        previousRegion = regionName;
                     end
                 end
             end
         end
     end
     
-    % Optimized single pass to compute both next_region_visited and next_fixation_region fields
-    fprintf('Computing next_region_visited and next_fixation_region fields...\n');
+    % Optimized single pass to compute all region tracking fields
+    fprintf('Computing previous_fixation_region, next_fixation_region, next_region_visited, and last_region_visited fields...\n');
     for iTrial = 1:max([EEG.event.trial_number])
         % Get all fixation events for this trial (compute once per trial)
         trialFixations = find([EEG.event.trial_number] == iTrial & startsWith({EEG.event.type}, fixationType));
@@ -451,10 +411,17 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
             regions{i} = EEG.event(trialFixations(i)).current_region;
         end
         
-        % Compute both fields efficiently in single loop
+        % Compute all four fields efficiently in single loop
         for iFixIdx = 1:numFixations
             iEvt = trialFixations(iFixIdx);
             currentRegion = regions{iFixIdx};
+            
+            % Set previous_fixation_region (immediate previous fixation)
+            if iFixIdx > 1
+                EEG.event(iEvt).previous_fixation_region = regions{iFixIdx-1};
+            else
+                EEG.event(iEvt).previous_fixation_region = '';
+            end
             
             % Set next_fixation_region (immediate next fixation)
             if iFixIdx < numFixations
@@ -472,9 +439,19 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                 end
             end
             EEG.event(iEvt).next_region_visited = nextDifferentRegion;
+            
+            % Set last_region_visited (last different region) with early termination
+            lastDifferentRegion = '';
+            for jFixIdx = iFixIdx-1:-1:1
+                if ~strcmpi(regions{jFixIdx}, currentRegion) && ~isempty(regions{jFixIdx})
+                    lastDifferentRegion = regions{jFixIdx};
+                    break;  % Early termination - stops at first different region
+                end
+            end
+            EEG.event(iEvt).last_region_visited = lastDifferentRegion;
         end
     end
-    fprintf('Done computing next_region_visited and next_fixation_region fields.\n');
+    fprintf('Done computing previous_fixation_region, next_fixation_region, next_region_visited, and last_region_visited fields.\n');
     
     % Fourth pass: Use next_fixation_region to pre-compute is_last_in_pass
     fprintf('Computing is_last_in_pass field using next_fixation_region...\n');
