@@ -526,6 +526,7 @@ function [EEG, com] = pop_label_datasets(EEG)
             if iscell(config.labelDescription)
                 config.labelDescription = config.labelDescription{1};
             end
+            config.labelDescription = strtrim(config.labelDescription); % Trim whitespace from user input
             
             % Store available regions for validation when loading
             config.availableRegions = regionNames;

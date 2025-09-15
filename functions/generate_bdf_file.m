@@ -125,35 +125,22 @@ function labeledCodes = extract_labeled_codes(EEG)
 end
 
 function codeMap = organize_label_codes(uniqueCodes)
-    % Organize label codes by condition and region
+    % Organize label codes by event type (last 4 digits: region + label)
     codeMap = struct();
     
-    % Collect condition codes (first 2 digits)
-    conditionCodes = unique(cellfun(@(x) x(1:2), uniqueCodes, 'UniformOutput', false));
+    % Extract unique event types (last 4 digits)
+    eventTypes = unique(cellfun(@(x) x(3:6), uniqueCodes, 'UniformOutput', false));
     
-    % For each condition code, collect regions (middle 2 digits)
-    for c = 1:length(conditionCodes)
-        condCode = conditionCodes{c};
-        codeMap.(sprintf('cond%s', condCode)) = struct();
+    % For each event type, collect all condition codes that have this event type
+    for i = 1:length(eventTypes)
+        eventType = eventTypes{i};
         
-        % Find all codes for this condition
-        condCodeIndices = find(cellfun(@(x) strcmp(x(1:2), condCode), uniqueCodes));
-        condLabelCodes = uniqueCodes(condCodeIndices);
+        % Find all codes that end with this event type
+        eventTypeIndices = find(cellfun(@(x) strcmp(x(3:6), eventType), uniqueCodes));
+        eventTypeCodes = uniqueCodes(eventTypeIndices);
         
-        % Extract region codes (middle 2 digits)
-        regionCodes = unique(cellfun(@(x) x(3:4), condLabelCodes, 'UniformOutput', false));
-        
-        % For each region in this condition, collect label codes (last 2 digits)
-        for r = 1:length(regionCodes)
-            regionCode = regionCodes{r};
-            
-            % Find all codes for this condition and region
-            regionIndices = find(cellfun(@(x) strcmp(x(1:2), condCode) && strcmp(x(3:4), regionCode), uniqueCodes));
-            regionLabelCodes = uniqueCodes(regionIndices);
-            
-            % Store all label codes for this condition and region
-            codeMap.(sprintf('cond%s', condCode)).(sprintf('region%s', regionCode)) = regionLabelCodes;
-        end
+        % Store all codes for this event type
+        codeMap.(sprintf('event%s', eventType)) = eventTypeCodes;
     end
 end
 
@@ -165,60 +152,56 @@ function write_bdf_file(codeMap, outputFile)
         error('Could not open file for writing: %s', outputFile);
     end
     
-    % Write BDF header
-    fprintf(fileID, 'bin descriptor file created by EyeSort plugin\n\n');
-    
     % Initialize bin number
     binNum = 1;
     
-    % Get all condition fields
-    conditionFields = fieldnames(codeMap);
+    % Get all event type fields
+    eventFields = fieldnames(codeMap);
     
-    % Process each condition
-    for c = 1:length(conditionFields)
-        condField = conditionFields{c};
-        condCode = regexprep(condField, 'cond', '');
+    % Sort event fields to ensure consistent output order
+    eventFields = sort(eventFields);
+    
+    % Process each event type
+    for i = 1:length(eventFields)
+        eventField = eventFields{i};
         
-        % Get all region fields for this condition
-        regionFields = fieldnames(codeMap.(condField));
+        % Get all codes for this event type
+        eventCodes = codeMap.(eventField);
         
-        % Process each region
-        for r = 1:length(regionFields)
-            regionField = regionFields{r};
-            
-            % Get all label codes for this condition and region
-            labelCodes = codeMap.(condField).(regionField);
-            
-            % Process each label code to create detailed description
-            for f = 1:length(labelCodes)
-                currentCode = labelCodes{f};
-                
-                % Default description
-                detailedDescription = sprintf('Condition %s', condCode);
-                
-                % Use BDF full description if available (our concatenation)
-                try
-                    EEG_workspace = evalin('base', 'EEG');
-                    for i = 1:length(EEG_workspace.event)
-                        evt = EEG_workspace.event(i);
-                        if isfield(evt, 'eyesort_full_code') && strcmp(evt.eyesort_full_code, currentCode) && ...
-                           isfield(evt, 'bdf_full_description') && ~isempty(evt.bdf_full_description)
+        % Sort codes to ensure consistent order
+        eventCodes = sort(eventCodes);
+        
+        % Get description from the first code (they should all have same event type description)
+        detailedDescription = sprintf('Event Type %s', regexprep(eventField, 'event', ''));
+        
+        % Try to get BDF full description from workspace
+        try
+            EEG_workspace = evalin('base', 'EEG');
+            for j = 1:length(EEG_workspace.event)
+                evt = EEG_workspace.event(j);
+                if isfield(evt, 'eyesort_full_code') && ~isempty(evt.eyesort_full_code)
+                    % Check if this event matches any of our codes
+                    if any(strcmp(evt.eyesort_full_code, eventCodes))
+                        if isfield(evt, 'bdf_full_description') && ~isempty(evt.bdf_full_description)
                             detailedDescription = evt.bdf_full_description;
                             break;
                         end
                     end
-                catch
-                    % Use default description if BDF fields can't be accessed
                 end
-                
-                % Write bin in BINLISTER format with the detailed description
-                fprintf(fileID, 'Bin %d\n', binNum);
-                fprintf(fileID, '%s\n', detailedDescription);
-                fprintf(fileID, '.{%s}\n\n', currentCode);
-                
-                binNum = binNum + 1;
             end
+        catch
+            % Use default description if BDF fields can't be accessed
         end
+        
+        % Create the codes string with semicolon separation
+        codesString = strjoin(eventCodes, '; ');
+        
+        % Write bin in BINLISTER format
+        fprintf(fileID, 'Bin %d\n', binNum);
+        fprintf(fileID, '%s\n', detailedDescription);
+        fprintf(fileID, '.{%s}\n\n', codesString);
+        
+        binNum = binNum + 1;
     end
     
     fclose(fileID);
