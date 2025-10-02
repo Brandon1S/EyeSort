@@ -327,8 +327,9 @@ function [EEG, com] = pop_load_datasets(EEG)
                     fprintf('Successfully loaded dataset with %d events.\n', length(EEG.event));
                 end
 
-                % Store in ALLEEG
-                [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, 0);
+                % Store in ALLEEG at index 1 (replace any existing dataset in single mode)
+                [ALLEEG, EEG, ~] = eeg_store([], EEG, 0);
+                CURRENTSET = 1;
                 
                 % Assign to base workspace
                 assignin('base', 'ALLEEG', ALLEEG);
