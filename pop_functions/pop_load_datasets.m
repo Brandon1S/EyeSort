@@ -40,62 +40,50 @@ function [EEG, com] = pop_load_datasets(EEG)
                   'Color',[0.94 0.94 0.94], ...
                   'Resize', 'off'); 
 
-    % supergui geometry
+    % supergui geometry - simplified unified interface
     geomhoriz = { ...
-        1,          ... Row 1: Single Dataset Pipeline
-        [1 0.5], ... Row 1
-        1,          ... Row 3
-        [0.5 1],          ... Row 4: Remove Selected button for individual datasets
-        1,          ... Row 5: Spacer          ... Row 6: Spacer
-        1,          ... Row 7: Spacer
-        [1 0.5], ... Row 8
-        1,          ... Row 9 (directory listbox)
-        [0.5 1],          ... Row 10: Remove Selected button for batch directory
-        1,          ... Row 11: Spacer
-        [1 0.5], ... Row 11
-        1,          ... Row 12 (output directory listbox)
-        [0.5 1],          ... Row 13: Remove Selected button for output directory
-        1,          ... Row 14: Spacer
-        [1 0.5 0.5], ... Row 15: Control buttons
+        1,              ... Row 1: Instructions
+        [1 0.5 0.5],    ... Row 2: Browse Files and Browse Directory buttons
+        1,              ... Row 3: Dataset listbox
+        [0.5 0.5 1],    ... Row 4: Remove Selected and Clear All buttons
+        1,              ... Row 5: Spacer
+        1,              ... Row 6: Output directory label
+        [1 0.5],        ... Row 7: Browse output directory
+        1,              ... Row 8: Output directory listbox
+        [0.5 1],        ... Row 9: Remove output directory button
+        1,              ... Row 10: Spacer
+        [1 0.5 0.5],    ... Row 11: Control buttons
     };
     
-    geomvert = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    geomvert = [1.5, 1, 3, 1, 0.5, 1, 1, 1.5, 1, 0.5, 1];
     
     uilist = { ...
-        {'Style', 'text', 'string', '──────────Single Dataset Pipeline───────────────────────────────────', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ... Row 1: Single Dataset Pipeline
+        {'Style', 'text', 'string', 'Select Dataset(s) and Output Directory (both required): One file = interactive mode, multiple files = batch processing', 'FontWeight', 'bold', 'HorizontalAlignment', 'left'}, ...
         ...
-        {'Style', 'text', 'string', 'Load individual dataset:', 'FontSize', 12}, ...
-        {'Style', 'pushbutton', 'string', 'Browse Files', 'callback', @(~,~) browse_for_datasets()}, ...
-        ... Row 3: 
-        {'Style', 'listbox', 'tag', 'datasetList', 'string', selected_datasets, 'Max', 10, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
-        ... Row 4:
+        {'Style', 'text', 'string', 'Load EEG Dataset(s):', 'FontSize', 12}, ...
+        {'Style', 'pushbutton', 'string', 'Browse Files', 'callback', @(~,~) browse_for_files()}, ...
+        {'Style', 'pushbutton', 'string', 'Browse Directory', 'callback', @(~,~) browse_for_directory()}, ...
+        ...
+        {'Style', 'listbox', 'tag', 'datasetList', 'string', selected_datasets, 'Max', 1, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
+        ...
         {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_dataset()}, ...
-        {}, ...
-        ...
-        {}, ... 
-        ... Row 5: Separator
-        {'Style', 'text', 'string', '──────────Multiple Datasets Pipeline───────────────────────────────────', 'FontWeight', 'bold', 'HorizontalAlignment', 'center'}, ...
-        ... Row 6: Directory selection option
-        {'Style', 'text', 'string', 'Select the Input Directory containing the datasets:', 'FontSize', 12}, ...
-        {'Style', 'pushbutton', 'string', 'Browse Dataset(s) Directory', 'callback', @(~,~) browse_for_directory()}, ...
-        ... Row 9: Selected directory listbox
-        {'Style', 'listbox', 'tag', 'batchDirList', 'string', {}, 'Max', 1, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
-        ... Row 10: Remove Selected button for batch directory
-        {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_batch_directory()}, ...
+        {'Style', 'pushbutton', 'string', 'Clear All', 'callback', @(~,~) clear_all_datasets()}, ...
         {}, ...
         ...
         {}, ...
-        ... Row 9: Output directory selection
-        {'Style', 'text', 'string', 'Select the Output Directory where the processed datasets will be saved:', 'FontSize', 12}, ...
+        ...
+        {'Style', 'text', 'string', 'Output Directory (Required - where processed datasets will be saved):', 'FontSize', 12, 'FontWeight', 'bold'}, ...
+        ...
+        {'Style', 'text', 'string', 'Where processed datasets will be saved:', 'FontSize', 10}, ...
         {'Style', 'pushbutton', 'string', 'Browse Output Directory', 'callback', @(~,~) browse_for_output()}, ...
-        ... Row 12: Selected output directory listbox
+        ...
         {'Style', 'listbox', 'tag', 'outputDirList', 'string', {}, 'Max', 1, 'Min', 1, 'HorizontalAlignment', 'left'}, ...
-        ... Row 13: Remove Selected button for output directory
+        ...
         {'Style', 'pushbutton', 'string', 'Remove Selected', 'callback', @(~,~) remove_output_directory()}, ...
         {}, ...
-        ... Row 14: Spacer
+        ...
         {}, ...
-        ... Row 15: Control buttons
+        ...
         {}, ...
         {'Style', 'pushbutton', 'string', 'Cancel', 'callback', @(~,~) cancel_button()}, ...
         {'Style', 'pushbutton', 'string', 'Confirm', 'callback', @(~,~) confirm_selection()}, ...
@@ -113,17 +101,17 @@ function [EEG, com] = pop_load_datasets(EEG)
     figure(hFig);
 
     % Variables to store directory paths
-    selectedDir = '';
     outputDir = '';
 
 %% ----------------------- NestedCallback Functions --------------------------
 
-    % -- BROWSE FOR DATASETS --
-    function browse_for_datasets(~,~)
+    % -- BROWSE FOR FILES --
+    function browse_for_files(~,~)
+        % File selection with multiselect enabled
         [files, path] = uigetfile( ...
             {'*.set', 'EEG dataset files (*.set)'}, ...
-            'Select EEG Dataset', ...
-            'MultiSelect', 'off');
+            'Select EEG Dataset(s) - MultiSelect Enabled', ...
+            'MultiSelect', 'on');
         figure(hFig); % Bring GUI back to front
 
         if isequal(files, 0)
@@ -134,22 +122,26 @@ function [EEG, com] = pop_load_datasets(EEG)
             files = {files}; 
         end
 
-        % Build full paths, append to selected_datasets
+        % Build full paths, check for duplicates
         new_paths = cellfun(@(f) fullfile(path, f), files, 'UniformOutput', false);
+        duplicates = ismember(new_paths, selected_datasets);
+        new_paths = new_paths(~duplicates);
+        
+        if any(duplicates)
+            msgbox(sprintf('%d duplicate dataset(s) skipped.', sum(duplicates)), 'Duplicates Skipped', 'warn');
+        end
+        
         selected_datasets = [selected_datasets, new_paths];
 
         % Update the listbox
         set(findobj(hFig, 'tag', 'datasetList'), ...
             'string', selected_datasets, ...
             'value', 1);
-            
-        % Clear any previously selected directory since we're using individual files
-        selectedDir = '';
-        set(findobj(hFig, 'tag', 'batchDirList'), 'string', {}, 'value', 1);
     end
 
     % -- BROWSE FOR DIRECTORY --
     function browse_for_directory(~,~)
+        % Directory selection
         dir_path = uigetdir('', 'Select Directory with EEG Datasets');
         figure(hFig); % Bring GUI back to front
         
@@ -157,16 +149,29 @@ function [EEG, com] = pop_load_datasets(EEG)
             return; % user canceled
         end
         
-        selectedDir = dir_path;
-        set(findobj(hFig, 'tag', 'batchDirList'), ...
-            'string', {selectedDir}, ...
+        % Find all .set files in the directory
+        fileList = dir(fullfile(dir_path, '*.set'));
+        
+        if isempty(fileList)
+            errordlg('No .set files found in the selected directory.', 'Error');
+            return;
+        end
+        
+        % Build full paths for all files in directory
+        new_paths = cell(1, length(fileList));
+        for i = 1:length(fileList)
+            new_paths{i} = fullfile(dir_path, fileList(i).name);
+        end
+        
+        % Replace selected_datasets with directory contents
+        selected_datasets = new_paths;
+        
+        % Update the listbox
+        set(findobj(hFig, 'tag', 'datasetList'), ...
+            'string', selected_datasets, ...
             'value', 1);
-            
-        % Clear individually selected datasets since we're using directory mode
-        selected_datasets = {};
-        set(findobj(hFig, 'tag', 'datasetList'), 'string', {}, 'value', 1);
     end
-    
+
     % -- BROWSE FOR OUTPUT DIRECTORY --
     function browse_for_output(~,~)
         dir_path = uigetdir('', 'Select Output Directory for Processed Files');
@@ -195,10 +200,10 @@ function [EEG, com] = pop_load_datasets(EEG)
         set(hList, 'string', selected_datasets, 'value', 1);
     end
 
-    % -- REMOVE BATCH DIRECTORY --
-    function remove_batch_directory(~,~)
-        selectedDir = '';
-        hList = findobj(hFig, 'tag', 'batchDirList');
+    % -- CLEAR ALL DATASETS --
+    function clear_all_datasets(~,~)
+        selected_datasets = {};
+        hList = findobj(hFig, 'tag', 'datasetList');
         set(hList, 'string', {}, 'value', 1);
     end
 
@@ -217,23 +222,20 @@ function [EEG, com] = pop_load_datasets(EEG)
 
     % -- CONFIRM SELECTION --
     function confirm_selection(~,~)
-        % Check if either individual datasets or a directory is selected
-        if isempty(selected_datasets) && isempty(selectedDir)
-            errordlg('No datasets or directory selected. Please select datasets or a directory.', 'Error');
+        % Check if datasets selected
+        if isempty(selected_datasets)
+            errordlg('No datasets selected. Please select at least one dataset.', 'Error');
             return;
         end
         
-        % Check if output directory is selected when using batch processing
-        if ~isempty(selectedDir) && isempty(outputDir)
-            errordlg('Please select an output directory for batch processing.', 'Error');
+        % Check if output directory is selected (required for all modes)
+        if isempty(outputDir)
+            errordlg('Output directory is required. Please select an output directory where processed datasets will be saved.', 'Error');
             return;
         end
         
-        % Check for mutually exclusive pipeline selection
-        if ~isempty(selected_datasets) && (~isempty(selectedDir) || ~isempty(outputDir))
-            errordlg('Cannot use both single dataset and batch processing pipelines simultaneously. Please clear one before proceeding.', 'Error');
-            return;
-        end
+        % Determine mode based on number of datasets
+        num_datasets = numel(selected_datasets);
 
         % Retrieve ALLEEG, CURRENTSET from base if they exist
         try
@@ -245,175 +247,110 @@ function [EEG, com] = pop_load_datasets(EEG)
             CURRENTSET= 0;
         end
 
-        % DIRECTORY-BASED BATCH LOADING
-        if ~isempty(selectedDir)
-            % Get all .set files in the directory
-            fileList = dir(fullfile(selectedDir, '*.set'));
-            
-            if isempty(fileList)
-                errordlg('No .set files found in the selected directory.', 'Error');
-                return;
+        % BATCH MODE: 2+ datasets
+        if num_datasets >= 2
+            % Store only file paths and metadata (memory efficient!)
+            batchFilePaths = selected_datasets;
+            batchFileNames = cell(1, num_datasets);
+            for i = 1:num_datasets
+                [~, name, ext] = fileparts(selected_datasets{i});
+                batchFileNames{i} = [name ext];
             end
             
-            % Create a progress bar
-            h = waitbar(0, 'Loading datasets for batch processing...', 'Name', 'Loading Datasets');
+            assignin('base', 'eyesort_batch_file_paths', batchFilePaths);
+            assignin('base', 'eyesort_batch_filenames', batchFileNames);
+            assignin('base', 'eyesort_batch_output_dir', outputDir);
+            assignin('base', 'eyesort_batch_mode', true);
             
+            % Load only the first dataset for GUI display
             try
-                batchFilePaths = {};
-                batchFileNames = {};
-                valid_count = 0;
-                
-                % Validate each dataset file (quick check without full loading)
-                for i = 1:length(fileList)
-                    file_path = fullfile(selectedDir, fileList(i).name);
-                    waitbar(i/length(fileList), h, sprintf('Validating %d of %d: %s', i, length(fileList), fileList(i).name));
-                    
-                    try
-                        % Quick validation - just check if file can be opened
-                        if exist(file_path, 'file')
-                            valid_count = valid_count + 1;
-                            batchFilePaths{valid_count} = file_path;
-                            batchFileNames{valid_count} = fileList(i).name;
-                            fprintf('Validated dataset %d/%d: %s\n', valid_count, length(fileList), fileList(i).name);
-                        else
-                            warning('File not found: %s', file_path);
-                        end
-                        
-                    catch ME
-                        warning('Failed to validate dataset %s:\n%s', file_path, ME.message);
-                    end
+                firstEEG = pop_loadset('filename', batchFilePaths{1});
+                if ~isfield(firstEEG, 'saved')
+                    firstEEG.saved = 'no';
                 end
-                
-                % Close progress bar
-                delete(h);
-                
-                if valid_count > 0
-                    % Store only file paths and metadata (memory efficient!)
-                    assignin('base', 'eyesort_batch_file_paths', batchFilePaths);
-                    assignin('base', 'eyesort_batch_filenames', batchFileNames);
-                    assignin('base', 'eyesort_batch_output_dir', outputDir);
-                    assignin('base', 'eyesort_batch_mode', true);
-                    
-                    % Load only the first dataset for GUI display
-                    try
-                        firstEEG = pop_loadset('filename', batchFilePaths{1});
-                        % Ensure EEG structure is properly formatted for EEGLAB
-                        if ~isfield(firstEEG, 'saved')
-                            firstEEG.saved = 'no';
-                        end
-                        assignin('base', 'EEG', firstEEG);
-                        fprintf('Loaded first dataset for GUI display: %s\n', batchFileNames{1});
-                    catch ME
-                        warning('EYESORT:LoadError', 'Could not load first dataset for display: %s', ME.message);
-                        assignin('base', 'EEG', eeg_emptyset);
-                    end
-                    
-                    % Build command string for history
-                    com = sprintf('EEG = pop_load_datasets(EEG); %% Prepared %d datasets for batch processing', valid_count);
-                    
-                    % Calculate approximate memory usage
-                    if valid_count > 1
-                        est_memory_mb = valid_count * 200; % Rough estimate
-                        memory_warning = '';
-                        if est_memory_mb > 2000
-                            memory_warning = sprintf('\n\nNote: Processing %d large datasets will be done one-at-a-time\nto avoid memory issues (estimated ~%.1f GB total).', valid_count, est_memory_mb/1000);
-                        end
-                    else
-                        memory_warning = '';
-                    end
-                    
-                    % Success message
-                    msgbox(sprintf(['Successfully prepared %d datasets for batch processing!%s\n\n'...
-                                   'Next steps:\n'...
-                                   '1. Configure Text Interest Areas (step 2)\n'...
-                                   '2. Configure and Apply Eye-Event Labels (step 3)\n\n'...
-                                   'Each step will process datasets one-at-a-time for memory efficiency.'], valid_count, memory_warning), 'Batch Setup Complete');
-                else
-                    errordlg('No valid datasets were found.', 'Validation Failed');
-                end
-                
+                assignin('base', 'EEG', firstEEG);
+                fprintf('Loaded first dataset for GUI display: %s\n', batchFileNames{1});
             catch ME
-                % Close progress bar if there was an error
-                if exist('h', 'var') && ishandle(h)
-                    delete(h);
-                end
-                errordlg(['Error during batch loading: ' ME.message], 'Error');
+                warning('EYESORT:LoadError', 'Could not load first dataset for display: %s', ME.message);
+                assignin('base', 'EEG', eeg_emptyset);
             end
             
-        % INDIVIDUAL DATASETS PROCESSING
+            % Build command string for history
+            com = sprintf('EEG = pop_load_datasets(EEG); %% Prepared %d datasets for batch processing', num_datasets);
+            
+            % Calculate approximate memory usage
+            est_memory_mb = num_datasets * 200;
+            memory_warning = '';
+            if est_memory_mb > 2000
+                memory_warning = sprintf('\n\nNote: Processing %d large datasets will be done one-at-a-time\nto avoid memory issues (estimated ~%.1f GB total).', num_datasets, est_memory_mb/1000);
+            end
+            
+            % Success message
+            msgbox(sprintf(['Successfully prepared %d datasets for batch processing!%s\n\n'...
+                           'Next steps:\n'...
+                           '1. Configure Text Interest Areas (step 2)\n'...
+                           '2. Configure and Apply Eye-Event Labels (step 3)\n\n'...
+                           'Each step will process datasets one-at-a-time for memory efficiency.'], num_datasets, memory_warning), 'Batch Setup Complete');
+            
+        % SINGLE DATASET MODE: 1 dataset
         else
-            % Clear any existing batch mode when loading individual datasets
+            % Clear any existing batch mode
             try
                 evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_output_dir eyesort_batch_mode');
             catch
                 % Variables might not exist, which is fine
             end
             
-            % Loop through selected datasets and load them
-            for i = 1:numel(selected_datasets)
-                dataset_path = selected_datasets{i};
-                try
-                    % pop_loadset returns a single EEG structure
-                    EEG = pop_loadset('filename', dataset_path);
-
-                    if isempty(EEG.data)
-                        warning('Dataset %s is empty. Skipping...', dataset_path);
-                        continue;
-                    end
-
-                    % Validate EEG structure and events
-                    if ~isfield(EEG, 'srate') || isempty(EEG.srate)
-                        warning('Dataset %s missing sampling rate. Skipping...', dataset_path);
-                        continue;
-                    end
-
-                    % Check for event data
-                    if ~isfield(EEG, 'event') || isempty(EEG.event)
-                        warning('Dataset %s has no events. This may cause issues with interest area calculations.', dataset_path);
-                        fprintf('Loading dataset anyway, but please verify event data exists in the original file.\n');
-                    else
-                        fprintf('Successfully loaded dataset with %d events.\n', length(EEG.event));
-                        % Add detailed event information
-                        fprintf('First event type: %s\n', EEG.event(1).type);
-                        fprintf('Event field names: %s\n', strjoin(fieldnames(EEG.event), ', '));
-                    end
-
-                    % Add verification before storage
-                    fprintf('Before storage - Dataset has %d events\n', length(EEG.event));
-                    [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, 0);
-                    fprintf('After storage - Dataset has %d events\n', length(EEG.event));
-                    
-                    % Save to output directory if specified
-                    if ~isempty(outputDir)
-                        [~, fileName, ~] = fileparts(dataset_path);
-                        output_path = fullfile(outputDir, [fileName '_processed.set']);
-                        pop_saveset(EEG, 'filename', output_path, 'savemode', 'twofiles');
-                    end
-                    
-                catch ME
-                    warning('Failed to load dataset %s:\n%s\nStack trace:\n%s', ...
-                            dataset_path, ME.message, getReport(ME, 'basic'));
-                end
-            end
-
-            % Add verification before closing
-            fprintf('Final EEG structure has %d events\n', length(EEG.event));
+            % Store output directory (required for auto-save after labeling)
+            assignin('base', 'eyesort_single_output_dir', outputDir);
             
-            % Assign updated ALLEEG, EEG, CURRENTSET to base workspace
-            assignin('base', 'ALLEEG', ALLEEG);
-            assignin('base', 'EEG', EEG);
-            assignin('base', 'CURRENTSET', CURRENTSET);
+            % Load the single dataset into ALLEEG
+            dataset_path = selected_datasets{1};
+            try
+                EEG = pop_loadset('filename', dataset_path);
 
-            % Note: Avoiding eeglab('redraw') to prevent GUI issues
+                if isempty(EEG.data)
+                    errordlg('Dataset is empty.', 'Error');
+                    return;
+                end
 
-            % Build the command string for EEGLAB history
-            com = 'EEG = pop_load_datasets(EEG);';
+                % Validate EEG structure
+                if ~isfield(EEG, 'srate') || isempty(EEG.srate)
+                    errordlg('Dataset missing sampling rate.', 'Error');
+                    return;
+                end
 
-            % Show success message
-            msgbox(sprintf(['Success: Dataset loaded successfully into EEGLAB.\n\n', ...
-            'Next steps:\n'...
-            '1. Configure Text Interest Areas (step 2)\n'...
-            '2. Configure and Apply Eye-Event Labels (step 3)\n']));
+                % Check for event data
+                if ~isfield(EEG, 'event') || isempty(EEG.event)
+                    warning('Dataset has no events. This may cause issues with interest area calculations.');
+                else
+                    fprintf('Successfully loaded dataset with %d events.\n', length(EEG.event));
+                end
+
+                % Store in ALLEEG at index 1 (replace any existing dataset in single mode)
+                [ALLEEG, EEG, ~] = eeg_store([], EEG, 0);
+                CURRENTSET = 1;
+                
+                % Assign to base workspace
+                assignin('base', 'ALLEEG', ALLEEG);
+                assignin('base', 'EEG', EEG);
+                assignin('base', 'CURRENTSET', CURRENTSET);
+
+                % Build command string for history
+                com = 'EEG = pop_load_datasets(EEG);';
+
+                % Show success message
+                msgbox(sprintf(['Success: Dataset loaded into EEGLAB.\n\n', ...
+                    'Output directory: %s\n\n'...
+                    'Processed dataset will be auto-saved after labeling.\n\n'...
+                    'Next steps:\n'...
+                    '1. Configure Text Interest Areas (step 2)\n'...
+                    '2. Configure and Apply Eye-Event Labels (step 3)\n'], outputDir));
+                
+            catch ME
+                errordlg(['Failed to load dataset: ' ME.message], 'Error');
+                return;
+            end
         end
         
         close(hFig);

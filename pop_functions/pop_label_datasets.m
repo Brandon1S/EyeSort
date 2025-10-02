@@ -771,6 +771,26 @@ function [EEG, com] = pop_label_datasets(EEG)
             assignin('base', 'EEG', labeledEEG);
             com = label_com;
             
+            % Auto-save if output directory is set (single dataset mode)
+            if finishAfter
+                try
+                    outputDir = evalin('base', 'eyesort_single_output_dir');
+                    if ~isempty(outputDir)
+                        if isfield(labeledEEG, 'filename') && ~isempty(labeledEEG.filename)
+                            [~, name, ~] = fileparts(labeledEEG.filename);
+                        else
+                            name = 'dataset';
+                        end
+                        output_path = fullfile(outputDir, [name '_labeled.set']);
+                        pop_saveset(labeledEEG, 'filename', output_path, 'savemode', 'twofiles');
+                        fprintf('Auto-saved labeled dataset to: %s\n', output_path);
+                    end
+                catch
+                    % No output dir set - shouldn't happen but handle gracefully
+                    warning('Could not auto-save: output directory not found');
+                end
+            end
+            
             % Display a message box with label results
             if labeledEEG.eyesort_last_label_matched_count > 0
                 msgStr = sprintf(['Label applied successfully!\n\n',...
