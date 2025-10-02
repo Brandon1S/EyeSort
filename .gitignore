@@ -22,8 +22,6 @@ Icon
 *.m~
 *.mex*
 *.mat
-!last_label_config.mat
-!last_text_ia_config.mat
 
 # Directories potentially created on remote AFP share
 .AppleDB

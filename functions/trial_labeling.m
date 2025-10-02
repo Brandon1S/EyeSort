@@ -389,6 +389,14 @@ function EEG = trial_labeling(EEG, startCode, endCode, conditionTriggers, itemTr
                         % Now update the previous trackers AFTER handling the last region behavior.
                         previousWord = currentWord;
                     end
+                    
+                    % Handle fixations outside word boundaries - clear end region tracking
+                    % to prevent false regression detection on next valid fixation
+                    if isempty(currentWord) && inEndRegion
+                        inEndRegion = false;
+                        endRegionFixationCount = 0;
+                        endRegionFixations = [];
+                    end
                 end
             end
         end
