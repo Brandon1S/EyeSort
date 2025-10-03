@@ -345,29 +345,6 @@ function [EEG, com] = pop_label_datasets(EEG)
             % Clean up temporary files
             cleanup_temp_files(batchFilePaths);
             
-            % Load all processed datasets into ALLEEG for BDF generation
-            try
-                if ~isempty(outputDir)
-                    processedFiles = dir(fullfile(outputDir, '*_processed.set'));
-                    if ~isempty(processedFiles)
-                        fprintf('Loading %d processed datasets into ALLEEG for BDF generation...\n', length(processedFiles));
-                        ALLEEG = [];
-                        for i = 1:length(processedFiles)
-                            processedPath = fullfile(outputDir, processedFiles(i).name);
-                            EEG = pop_loadset('filename', processedPath);
-                            [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, i);
-                            fprintf('  Loaded: %s\n', processedFiles(i).name);
-                        end
-                        assignin('base', 'ALLEEG', ALLEEG);
-                        assignin('base', 'EEG', EEG); % Last dataset as current
-                        assignin('base', 'CURRENTSET', CURRENTSET);
-                        fprintf('Successfully loaded %d processed datasets into ALLEEG\n', length(ALLEEG));
-                    end
-                end
-            catch ME
-                fprintf('Warning: Could not load processed datasets into ALLEEG: %s\n', ME.message);
-            end
-            
             % Clear batch mode after processing (keep output dir for BDF generation)
             evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_mode');
             
@@ -701,29 +678,6 @@ function [EEG, com] = pop_label_datasets(EEG)
                 if finishAfter
                     % Clean up temporary files
                     cleanup_temp_files(batchFilePaths);
-                    
-                    % Load all processed datasets into ALLEEG for BDF generation
-                    try
-                        if ~isempty(outputDir)
-                            processedFiles = dir(fullfile(outputDir, '*_processed.set'));
-                            if ~isempty(processedFiles)
-                                fprintf('Loading %d processed datasets into ALLEEG for BDF generation...\n', length(processedFiles));
-                                ALLEEG = [];
-                                for i = 1:length(processedFiles)
-                                    processedPath = fullfile(outputDir, processedFiles(i).name);
-                                    EEG = pop_loadset('filename', processedPath);
-                                    [ALLEEG, EEG, CURRENTSET] = eeg_store(ALLEEG, EEG, i);
-                                    fprintf('  Loaded: %s\n', processedFiles(i).name);
-                                end
-                                assignin('base', 'ALLEEG', ALLEEG);
-                                assignin('base', 'EEG', EEG); % Last dataset as current
-                                assignin('base', 'CURRENTSET', CURRENTSET);
-                                fprintf('Successfully loaded %d processed datasets into ALLEEG\n', length(ALLEEG));
-                            end
-                        end
-                    catch ME
-                        fprintf('Warning: Could not load processed datasets into ALLEEG: %s\n', ME.message);
-                    end
                     
                     % Clear batch mode after processing (keep output dir for BDF generation)
                     evalin('base', 'clear eyesort_batch_file_paths eyesort_batch_filenames eyesort_batch_mode');

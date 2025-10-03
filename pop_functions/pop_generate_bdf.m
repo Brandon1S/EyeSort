@@ -5,78 +5,35 @@ function [EEG, com] = pop_generate_bdf(EEG)
 %   >> [EEG, com] = pop_generate_bdf(EEG);
 %
 % Inputs:
-%   EEG   - EEGLAB EEG structure or ALLEEG array with labeled events
+%   EEG   - EEGLAB EEG structure (optional, not used for memory-efficient processing)
 %
 % Outputs:
-%   EEG   - Same as input EEG
+%   EEG   - Same as input EEG (unchanged)
 %   com   - Command string for EEGLAB history
 %
 % This function presents a GUI to create a BINLISTER Bin Descriptor File (BDF)
-% from labeled events in EEG datasets. The BDF file can then be used with 
-% EEGLAB's BINLISTER function for further processing.
+% from labeled events in processed datasets. The function will automatically
+% find processed datasets from the output directory specified during dataset loading.
 %
 % See also: generate_bdf_file, pop_label_datasets
 
     % Initialize output
     com = '';
     
-    % If no EEG input, try to get it from base workspace
-    if nargin < 1
+    % Get EEG from workspace if not provided (for EEGLAB compatibility)
+    if nargin < 1 || isempty(EEG)
         try
             EEG = evalin('base', 'EEG');
         catch
-            try
-                EEG = evalin('base', 'ALLEEG');
-            catch
-                errordlg('No EEG or ALLEEG found in EEGLAB workspace.', 'Error');
-                return;
-            end
+            % No EEG in workspace, create empty one for return value
+            EEG = [];
         end
     end
     
-    % Validate input
-    if isempty(EEG)
-        errordlg('EEG dataset is empty. Please load Labeled datasets first.', 'Error');
-        return;
-    end
-    
-    % Check if EEG is labeled
-    hasLabeledEvents = false;
-    
-    if length(EEG) > 1
-        % Check multiple datasets
-        for i = 1:length(EEG)
-            if ~isempty(EEG(i)) && isfield(EEG(i), 'event') && ~isempty(EEG(i).event)
-                % Check for 6-digit event codes (labeled events)
-                for j = 1:length(EEG(i).event)
-                    if isfield(EEG(i).event(j), 'type') && ischar(EEG(i).event(j).type) && ...
-                            length(EEG(i).event(j).type) == 6 && all(isstrprop(EEG(i).event(j).type, 'digit'))
-                        hasLabeledEvents = true;
-                        break;
-                    end
-                end
-                if hasLabeledEvents
-                    break;
-                end
-            end
-        end
-    else
-        % Check single dataset
-        if isfield(EEG, 'event') && ~isempty(EEG.event)
-            for i = 1:length(EEG.event)
-                if isfield(EEG.event(i), 'type') && ischar(EEG.event(i).type) && ...
-                        length(EEG.event(i).type) == 6 && all(isstrprop(EEG.event(i).type, 'digit'))
-                    hasLabeledEvents = true;
-                    break;
-                end
-            end
-        end
-    end
-    
-    if ~hasLabeledEvents
-        errordlg('No labeled events found in the dataset(s). Please run labeling first.', 'Error');
-        return;
-    end
+    % No validation needed - generate_bdf_file will handle finding datasets from:
+    % 1. Output directory variables (batch/single mode)
+    % 2. Workspace EEG/ALLEEG (if available)
+    % 3. User prompt for directory (fallback)
     
     % Create the figure for the GUI
     hFig = figure('Name','Generate BINLISTER BDF File', ...
@@ -98,26 +55,13 @@ function [EEG, com] = pop_generate_bdf(EEG)
           
     % Description text
     uicontrol('Style', 'text', ...
-              'String', ['This will analyze the 6-digit label codes in your labeled datasets ' ...
-                         'and create a BINLISTER compatible bin descriptor file (BDF).' char(10) ...
+              'String', ['This will analyze the 6-digit label codes in your processed/labeled datasets ' ...
+                         'and create a BINLISTER compatible bin descriptor file (BDF).' char(10) char(10) ...
+                         'The function will automatically find your processed datasets from the ' ...
+                         'output directory you selected earlier.' char(10) char(10) ...
                          'The BDF can be used with BINLISTER for further analysis.'], ...
-              'Position', [20 130 410 60], ...
+              'Position', [20 80 410 110], ...
               'HorizontalAlignment', 'left', ...
-              'BackgroundColor', [0.94 0.94 0.94], ...
-              'ForegroundColor', [0 0 0]);
-    
-    % Dataset info text
-    if length(EEG) > 1
-        datasetText = sprintf('Analyzing %d labeled datasets', length(EEG));
-    else
-        datasetText = 'Analyzing current labeled dataset';
-    end
-    
-    uicontrol('Style', 'text', ...
-              'String', datasetText, ...
-              'Position', [20 100 410 20], ...
-              'HorizontalAlignment', 'left', ...
-              'FontWeight', 'bold', ...
               'BackgroundColor', [0.94 0.94 0.94], ...
               'ForegroundColor', [0 0 0]);
     
